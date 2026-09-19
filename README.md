@@ -101,9 +101,9 @@ node --import tsx --env-file=.env scripts/smoke-tools.ts
 npm run eval:live
 ```
 
-Offline evals exercise real parsing/report/export code with honestly unavailable external evidence. They do not fabricate web results or prove model execution. Live evals require three distinct successful MCP tools, native approval pauses, sourced evidence, injection handling, uncertainty, and completed denial continuations. They **do not automatically approve exports**; exercise successful approval through the frontend.
+Offline evals exercise real parsing/report/export code with honestly unavailable external evidence. They do not fabricate web results or prove model execution. Live evals require three distinct successful MCP tools, native approval pauses, sourced evidence, injection handling, uncertainty, completed denial continuations, and actual execution when a sandbox is available. They **do not automatically approve exports**; exercise successful approval through the frontend.
 
-Live session IDs/results stay in ignored `.data/`. [Verification notes](docs/VERIFICATION.md) distinguish performed checks from outstanding prerequisites.
+Live session IDs/results stay in ignored `.data/`. [Verification notes](docs/VERIFICATION.md) record 79 passing tests, 12 offline evaluations, all three successful live demos with native sandbox execution, and a UI-approved export after refresh and harness restart.
 
 ## Boundaries
 

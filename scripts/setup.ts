@@ -34,7 +34,8 @@ export async function setup() {
       auth: { type: 'header', headers: { Authorization: `Bearer ${token}` } },
     },
   });
-  const provider = process.env.MODEL_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : undefined);
+  const provider =
+    process.env.MODEL_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : undefined);
   const providerKey = process.env.MODEL_API_KEY || process.env.OPENAI_API_KEY;
   if (providerKey && provider) {
     const catalog = await client.catalogs.modelProviders.list();

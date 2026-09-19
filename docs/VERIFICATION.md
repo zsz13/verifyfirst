@@ -9,6 +9,7 @@ Deterministic checks, live MCP checks, and model-backed acceptance are separate 
 - Real HTTP MCP smoke discovered seven tools and executed extraction, domain/URL inspection, organization verification, trusted-source retrieval, and report creation. Ungranted export was rejected. Official Chase, CFPB, and FTC pages were retrieved live; reserved demo-domain DNS/RDAP results honestly remained unknown.
 - TrueForge 0.2.0 started with SQLite and the investigation connector. The native local sandbox support probe succeeded outside a nested OS sandbox.
 - Lint, typecheck, production build, 71 boundary/recovery/HTTP tests, and 12 offline eval cases passed after the review fixes. Production dependency audit reported zero advisories.
+- A fresh clone from the public GitHub repository passed `npm ci`, `npm run format:check`, and the complete `npm run check` without credentials or existing generated files.
 - Desktop 1280×900 and mobile 375×812 empty/setup states were independently inspected; keyboard focus and no horizontal clipping were observed.
 
 ## Not yet established

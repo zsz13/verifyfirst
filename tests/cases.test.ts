@@ -65,6 +65,20 @@ function toolCall(
     toolInfo: { type: 'mcp', name, serverName, serverId: 'connector' },
   };
 }
+function wrappedCall(
+  name: string,
+  callId = name,
+  input: unknown = { caseId: id },
+): TrueForgeApi.ToolCall {
+  return {
+    ...toolCall('call_tool', callId),
+    function: {
+      name: 'call_tool',
+      arguments: JSON.stringify({ mcp_server: `verifyfirst-${id}`, tool_name: name, input }),
+    },
+    toolInfo: { type: 'truefoundry-system', name: 'call_tool' },
+  };
+}
 function model(calls: TrueForgeApi.ToolCall[]): TrueForgeApi.ModelMessageEvent {
   return {
     id: randomUUID(),
@@ -198,6 +212,59 @@ describe('case recovery and approval integrity', () => {
     },
   );
 
+  it('approves a case-bound native MCP wrapper using the wrapper call identity', async () => {
+    await preparedCase();
+    events = [model([wrappedCall('export_case_report', 'export')])];
+    expect((await cases.readCase(id)).approvals).toEqual([
+      {
+        threadId: 'main',
+        toolCallId: 'export',
+        toolName: 'export_case_report',
+        arguments: JSON.stringify({ caseId: id }),
+        actionable: true,
+      },
+    ]);
+    await cases.approveCase(id, { toolCallId: 'export', decision: 'allow' });
+    expect(mocks.createTurn).toHaveBeenCalledExactlyOnceWith('session', {
+      input: [
+        {
+          type: 'user.tool_approval',
+          threadId: 'main',
+          toolCallId: 'export',
+          approval: { status: 'allow' },
+        },
+      ],
+    });
+  });
+  it.each(['server', 'case', 'extra_input', 'extra_wrapper', 'malformed', 'wrong_wrapper'])(
+    'rejects unsafe native MCP wrapper: %s',
+    async (variant) => {
+      await preparedCase();
+      const call = wrappedCall('export_case_report', 'export');
+      const args = {
+        mcp_server: `verifyfirst-${id}`,
+        tool_name: 'export_case_report',
+        input: { caseId: id },
+      };
+      if (variant === 'server') args.mcp_server = `verifyfirst-${randomUUID()}`;
+      if (variant === 'case') args.input.caseId = randomUUID();
+      call.function.arguments = JSON.stringify(
+        variant === 'extra_wrapper'
+          ? { ...args, bypass: true }
+          : variant === 'extra_input'
+            ? { ...args, input: { ...args.input, path: '/tmp/forged' } }
+            : args,
+      );
+      if (variant === 'malformed') call.function.arguments = '{';
+      if (variant === 'wrong_wrapper') call.toolInfo = { type: 'truefoundry-system', name: 'exec' };
+      events = [model([call])];
+      expect((await cases.readCase(id)).approvals[0]?.actionable).toBe(false);
+      await expect(
+        cases.approveCase(id, { toolCallId: 'export', decision: 'allow' }),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(mocks.createTurn).not.toHaveBeenCalled();
+    },
+  );
   it('recovers a stale legacy lock and rejects an overlapping decision', async () => {
     await preparedCase();
     await writeFile(cases.casePath(id, 'approval.lock'), '');
@@ -360,9 +427,44 @@ describe('case connector and execution evidence', () => {
       };
       events.push(model([call]), response(call.id, result));
     }
-    expect((await cases.readCase(id)).sandboxExecuted).toBe(executed);
+    const view = await cases.readCase(id);
+    expect(view.sandboxExecuted).toBe(executed);
+    expect(view.activity.find((item) => item.type === 'sandbox.created')?.detail).toBe(
+      'Native TrueForge sandbox ready for isolated execution.',
+    );
   });
 
+  it('attributes wrapped MCP results to their recorded call, including failures', async () => {
+    await preparedCase();
+    const success = wrappedCall('analyze_submission');
+    const failure = wrappedCall('search_trusted_sources');
+    const foreign = wrappedCall('inspect_domain');
+    foreign.function.arguments = JSON.stringify({
+      mcp_server: 'unknown-server',
+      tool_name: 'inspect_domain',
+      input: { caseId: id },
+    });
+    events = [
+      model([success, failure, foreign]),
+      response(success.id, '{"evidence":[]}'),
+      response(failure.id, '{"isError":true}'),
+      response(foreign.id, '{"tool_name":"export_case_report","success":true}'),
+      response('unknown-call', '{"tool_name":"export_case_report","success":true}'),
+    ];
+    const result = await cases.readCase(id);
+    expect(result.activity.find((item) => item.id === success.id)?.label).toBe(
+      'analyze_submission',
+    );
+    expect(
+      result.activity
+        .filter((item) => item.toolKind === 'mcp' && item.success)
+        .map((item) => item.toolName),
+    ).toEqual(['analyze_submission']);
+    expect(
+      result.activity.find((item) => item.toolName === 'search_trusted_sources'),
+    ).toMatchObject({ toolKind: 'mcp', success: false });
+    expect(result.activity.some((item) => item.toolName === 'export_case_report')).toBe(false);
+  });
   it('registers an authenticated case-bound connector before starting its session', async () => {
     const result = await cases.createCase({ text: 'Please check this message.' });
     expect(mocks.register).toHaveBeenCalledWith({

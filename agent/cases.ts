@@ -136,6 +136,39 @@ export async function createCase(input: unknown): Promise<CaseView> {
     sandboxExecuted: false,
   };
 }
+interface NormalizedTool {
+  type: 'mcp' | 'truefoundry-system';
+  name: string;
+  serverName?: string;
+  arguments: string;
+}
+function normalizeTool(call: TrueForgeApi.ToolCall, caseId: string): NormalizedTool {
+  const original = { ...call.toolInfo, arguments: call.function.arguments };
+  if (call.toolInfo.type !== 'truefoundry-system' || call.toolInfo.name !== 'call_tool')
+    return original;
+  // TrueForge's native MCP dispatcher keeps the wrapper's call identity. Only
+  // its exact invocation schema and this case's connector establish MCP identity.
+  try {
+    const wrapped = z
+      .object({
+        mcp_server: z.literal(`verifyfirst-${caseId}`),
+        tool_name: z.string().min(1),
+        input: z.record(z.string(), z.unknown()),
+      })
+      .strict()
+      .safeParse(JSON.parse(call.function.arguments));
+    if (wrapped.success)
+      return {
+        type: 'mcp',
+        name: wrapped.data.tool_name,
+        serverName: wrapped.data.mcp_server,
+        arguments: JSON.stringify(wrapped.data.input),
+      };
+  } catch {
+    /* Malformed native calls retain their native identity. */
+  }
+  return original;
+}
 export function resolveApprovals(
   caseId: string,
   turn: TrueForgeApi.Turn,
@@ -150,7 +183,8 @@ export function resolveApprovals(
       ? []
       : action.toolCalls.map((ref) => {
           const call = calls.find((candidate) => candidate.id === ref.id);
-          const args = call?.function.arguments ?? '';
+          const tool = call ? normalizeTool(call, caseId) : undefined;
+          const args = tool?.arguments ?? '';
           let matches = false;
           try {
             const parsed: unknown = JSON.parse(args);
@@ -164,12 +198,12 @@ export function resolveApprovals(
           return {
             threadId: action.threadId,
             toolCallId: ref.id,
-            toolName: call?.toolInfo.name ?? 'Unresolved tool',
+            toolName: tool?.name ?? 'Unresolved tool',
             arguments: args,
             actionable: Boolean(
-              call?.toolInfo.type === 'mcp' &&
-              call.toolInfo.serverName === `verifyfirst-${caseId}` &&
-              call.toolInfo.name === 'export_case_report' &&
+              tool?.type === 'mcp' &&
+              tool.serverName === `verifyfirst-${caseId}` &&
+              tool.name === 'export_case_report' &&
               matches,
             ),
           };
@@ -247,26 +281,27 @@ function sandboxOutput(content: string): string | null {
     return null;
   }
 }
-function activity(events: TrueForgeApi.SessionEvent[]): Activity[] {
+function activity(events: TrueForgeApi.SessionEvent[], caseId: string): Activity[] {
   const calls = new Map(
     events.flatMap((event) =>
       event.type === 'model.message'
-        ? (event.toolCalls ?? []).map((call) => [call.id, call.toolInfo] as const)
+        ? (event.toolCalls ?? []).map((call) => [call.id, normalizeTool(call, caseId)] as const)
         : [],
     ),
   );
   return events.flatMap((event): Activity[] => {
     const base = { id: event.id, type: event.type, timestamp: event.createdAt };
     if (event.type === 'model.message')
-      return (event.toolCalls ?? []).map((call) => ({
-        ...base,
-        id: call.id,
-        label: call.toolInfo.name,
-        detail:
-          call.toolInfo.type === 'mcp'
-            ? 'TrueForge → VerifyFirst MCP'
-            : 'TrueForge native tool execution',
-      }));
+      return (event.toolCalls ?? []).map((call) => {
+        const tool = normalizeTool(call, caseId);
+        return {
+          ...base,
+          id: call.id,
+          label: tool.name,
+          detail:
+            tool.type === 'mcp' ? 'TrueForge → VerifyFirst MCP' : 'TrueForge native tool execution',
+        };
+      });
     if (event.type === 'tool.response') {
       const tool = calls.get(event.toolCallId);
       const output =
@@ -296,7 +331,7 @@ function activity(events: TrueForgeApi.SessionEvent[]): Activity[] {
         {
           ...base,
           label: 'Sandbox provisioned',
-          detail: `Native TrueForge sandbox · ${event.sandboxId}`,
+          detail: 'Native TrueForge sandbox ready for isolated execution.',
         },
       ];
     if (event.type === 'mcp.initialize')
@@ -396,7 +431,7 @@ export async function readCase(id: string): Promise<CaseView> {
   return {
     ...meta,
     status,
-    activity: activity(events),
+    activity: activity(events, id),
     approvals,
     report,
     exported,

@@ -26,14 +26,15 @@ export function SiteHeader({
 }) {
   return (
     <header className="site-header">
-      <Link href="/" className="brand" aria-label="VerifyFirst home">
+      {/* Home intentionally reloads the document to discard active workbench state. */}
+      <a href="/" className="brand" aria-label="VerifyFirst home">
         <BrandMark />
         VerifyFirst
-      </Link>
+      </a>
       <nav className="site-nav" aria-label="Main navigation">
-        <Link href="/" aria-current={active === 'investigate' ? 'page' : undefined}>
+        <a href="/" aria-current={active === 'investigate' ? 'page' : undefined}>
           Investigate
-        </Link>
+        </a>
         <Link href="/how-it-works" aria-current={active === 'how' ? 'page' : undefined}>
           How it works
         </Link>

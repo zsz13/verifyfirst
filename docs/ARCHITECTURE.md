@@ -4,7 +4,7 @@ One investigation maps to one TrueForge session. Next.js uses the official SDK t
 
 TrueForge stores provider credentials and session history outside the checkout in `~/.local/share/verifyfirst/trueforge.sqlite`; the runtime uses owner-only file permissions.
 
-The original submission, evidence, case/session mapping, approval journal, and export are private files in `.data/cases/<uuid>/`. The browser stores the case UUID; sessionStorage can also hold a case UUID requesting a post-approval automatic download. Neither is authorization. Reconnect reconciles the latest harness turn. One local application process is the supported deployment.
+The original submission, evidence, case/session mapping, approval journal, and export are private files in `.data/cases/<uuid>/`. The `?case=<uuid>` URL selects the active frontend case; the root route never restores a case from browser storage. Home links load a fresh document to discard transient frontend state without cancelling or deleting durable sessions. sessionStorage can hold a case UUID requesting a post-approval automatic download. Neither is authorization. Reconnect reconciles the latest harness turn. One local application process is the supported deployment.
 
 ## Data boundary
 

@@ -136,7 +136,7 @@ MCP tools:
 - `create_case_report`: deterministic risk, comparisons, limitations and recommended actions from recorded evidence.
 - `export_case_report`: native approval plus a one-use case/report-bound grant; redacted JSON and a printable HTML representation of the same artifact.
 
-See [architecture and safety decisions](docs/ARCHITECTURE.md). Refresh/reconnect recovers the persisted harness session; closing the browser does not cancel an investigation.
+See [architecture and safety decisions](docs/ARCHITECTURE.md). Opening `/` or clicking the logo/Investigate navigation starts a clean investigation. Bookmark the `/?case=<id>` link to reopen a case; refreshing or reconnecting on that link recovers its persisted harness session. Returning home does not cancel or delete the investigation.
 
 ## Test and evaluate
 
@@ -144,6 +144,10 @@ See [architecture and safety decisions](docs/ARCHITECTURE.md). Refresh/reconnect
 npm ci
 npm run check        # lint, typecheck, tests, offline evals, production build
 npm run format:check
+
+# Browser navigation regressions; production build from check must exist:
+npx playwright install chromium
+npm run test:browser
 
 # Services running; network required, no model required:
 node --import tsx --env-file=.env scripts/smoke-tools.ts

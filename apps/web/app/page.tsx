@@ -25,21 +25,14 @@ import {
 import { extractMessageUrls, MAX_INVESTIGATION_URLS } from '../../../agent/input';
 import { demos } from '../../../fixtures/demos';
 
-const STORAGE_KEY = 'verifyfirst.caseId';
 const CASE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROVIDER_UNAVAILABLE =
   'The investigation provider is unavailable. Check your model connection in TrueForge, then try again.';
-function restorableCaseId(fallback?: string): string | null {
+function restorableCaseId(): string | null {
   const linked = new URL(window.location.href).searchParams.get('case');
-  if (linked && CASE_ID_PATTERN.test(linked)) return linked;
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && CASE_ID_PATTERN.test(saved)) return saved;
-  } catch {
-    // The active case can still be recovered when browser storage is unavailable.
-  }
-  return fallback && CASE_ID_PATTERN.test(fallback) ? fallback : null;
+  // An explicit case link owns recovery. The root route always starts fresh.
+  return linked && CASE_ID_PATTERN.test(linked) ? linked : null;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -209,7 +202,7 @@ export default function Home() {
     setRestoring(true);
     try {
       await refreshHealth();
-      const saved = restorableCaseId(caseView?.id);
+      const saved = restorableCaseId();
       if (saved) {
         const result = await request<CaseView>(`/api/cases/${encodeURIComponent(saved)}`);
         if (generation === caseGeneration.current) setCaseView(result);
@@ -279,13 +272,6 @@ export default function Home() {
           'Investigation started. This browser could not update the case link, so keep this tab open.',
         );
       }
-      try {
-        localStorage.setItem(STORAGE_KEY, result.id);
-      } catch {
-        setError(
-          'Investigation started. This browser could not save the case ID, so keep this tab open.',
-        );
-      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -342,6 +328,7 @@ export default function Home() {
       : 'Connect the investigation tools in TrueForge to begin.';
   const activeCase = caseView?.status === 'running' || caseView?.status === 'approval_required';
   const busy = submitting || restoring || activeCase;
+  const showInvestigation = Boolean(caseView || error || connectionError);
 
   return (
     <>
@@ -423,7 +410,7 @@ export default function Home() {
             </button>
           </div>
         )}
-        <div className="workbench">
+        <div className={`workbench${showInvestigation ? '' : ' workbench-new'}`}>
           <aside className="input-column">
             <section className="input-card" aria-labelledby="input-heading">
               <div className="card-heading">
@@ -639,236 +626,242 @@ export default function Home() {
               Limited evidence never means verified safe.
             </p>
           </aside>
-          <section className="case-column" aria-label="Investigation results">
-            {error && (
-              <div className="error-notice" role="alert">
-                <ShieldAlert size={18} aria-hidden="true" />
-                <p>{error}</p>
-                <button
-                  type="button"
-                  aria-label="Dismiss error"
-                  onClick={() => {
-                    setError('');
-                  }}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            )}
-            {connectionError && (
-              <div className="error-notice" role="status">
-                <LoaderCircle size={18} className="spinner" aria-hidden="true" />
-                <p>Connection interrupted. Retrying automatically. {connectionError}</p>
-              </div>
-            )}
-            {!caseView ? (
-              <div className="empty-case">
-                <div className="empty-top">
-                  <span className="step-tag">02 / INVESTIGATION</span>
-                  <span className="neutral-badge">
-                    {restoring ? 'Restoring case' : !ready ? 'Setup needed' : 'Ready when you are'}
-                  </span>
+          {showInvestigation && (
+            <section className="case-column" aria-label="Investigation results">
+              {error && (
+                <div className="error-notice" role="alert">
+                  <ShieldAlert size={18} aria-hidden="true" />
+                  <p>{error}</p>
+                  <button
+                    type="button"
+                    aria-label="Dismiss error"
+                    onClick={() => {
+                      setError('');
+                    }}
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
-                <div className="empty-intro">
-                  <div className="empty-icon">
-                    <BrandMark size={36} />
-                    <span>
-                      <Check size={12} />
+              )}
+              {connectionError && (
+                <div className="error-notice" role="status">
+                  <LoaderCircle size={18} className="spinner" aria-hidden="true" />
+                  <p>Connection interrupted. Retrying automatically. {connectionError}</p>
+                </div>
+              )}
+              {!caseView ? (
+                <div className="empty-case">
+                  <div className="empty-top">
+                    <span className="step-tag">02 / INVESTIGATION</span>
+                    <span className="neutral-badge">
+                      {restoring
+                        ? 'Restoring case'
+                        : !ready
+                          ? 'Setup needed'
+                          : 'Ready when you are'}
                     </span>
                   </div>
-                  <h2>
-                    From uneasy feeling
-                    <br />
-                    to informed decision.
-                  </h2>
-                  <p>
-                    Get a clear assessment backed by a trail you can inspect. No blind trust
-                    required.
-                  </p>
-                </div>
-                <ol className="process-list">
-                  <li>
-                    <span className="process-number">1</span>
-                    <div>
-                      <h3>Inspect the signals</h3>
-                      <p>Look for pressure, impersonation, and requests that don’t add up.</p>
+                  <div className="empty-intro">
+                    <div className="empty-icon">
+                      <BrandMark size={36} />
+                      <span>
+                        <Check size={12} />
+                      </span>
                     </div>
-                  </li>
-                  <li>
-                    <span className="process-number">2</span>
-                    <div>
-                      <h3>Cross-check the story</h3>
-                      <p>Compare claims and domains with independent reference sources.</p>
-                    </div>
-                  </li>
-                  <li>
-                    <span className="process-number">3</span>
-                    <div>
-                      <h3>Choose your next move</h3>
-                      <p>
-                        Review the evidence and safer next steps. Any report export needs your
-                        approval.
-                      </p>
-                    </div>
-                  </li>
-                </ol>
-                <div className="empty-footer">
-                  <CheckCheck size={16} aria-hidden="true" />
-                  <span>Evidence first. Action only with your say.</span>
-                </div>
-              </div>
-            ) : (
-              <div className="case-card">
-                <div className="case-header">
-                  <div>
-                    <span className="step-tag">02 / INVESTIGATION</span>
-                    <p className="case-id">Case {caseView.id.slice(0, 8)}</p>
-                  </div>
-                  <span
-                    className={`neutral-badge ${caseView.status === 'running' ? 'running-badge' : ''}`}
-                  >
-                    {caseView.status === 'running' && (
-                      <LoaderCircle size={13} className="spinner" aria-hidden="true" />
-                    )}
-                    {caseView.status === 'approval_required'
-                      ? 'Approval needed'
-                      : caseView.status === 'running'
-                        ? 'Investigating'
-                        : caseView.status === 'complete'
-                          ? 'Complete'
-                          : caseView.status === 'cancelled'
-                            ? 'Cancelled'
-                            : 'Needs attention'}
-                  </span>
-                </div>
-                {caseView.report ? (
-                  <InvestigationDashboard
-                    key={caseView.id}
-                    caseView={caseView}
-                    report={caseView.report}
-                  />
-                ) : (
-                  <div className="pending-report">
-                    <Search size={27} strokeWidth={1.5} aria-hidden="true" />
                     <h2>
-                      {caseView.status === 'error'
-                        ? 'The investigation was interrupted.'
-                        : caseView.status === 'cancelled'
-                          ? 'This investigation was cancelled.'
-                          : 'Following the evidence…'}
+                      From uneasy feeling
+                      <br />
+                      to informed decision.
                     </h2>
                     <p>
-                      {caseView.status === 'error' || caseView.status === 'cancelled'
-                        ? 'You can start a new investigation from the message panel.'
-                        : 'Observations will appear here as the investigation progresses. You can follow each step below.'}
+                      Get a clear assessment backed by a trail you can inspect. No blind trust
+                      required.
                     </p>
                   </div>
-                )}
-                {caseView.error && (
-                  <div className="error-notice" role="alert">
-                    <p>{PROVIDER_UNAVAILABLE}</p>
+                  <ol className="process-list">
+                    <li>
+                      <span className="process-number">1</span>
+                      <div>
+                        <h3>Inspect the signals</h3>
+                        <p>Look for pressure, impersonation, and requests that don’t add up.</p>
+                      </div>
+                    </li>
+                    <li>
+                      <span className="process-number">2</span>
+                      <div>
+                        <h3>Cross-check the story</h3>
+                        <p>Compare claims and domains with independent reference sources.</p>
+                      </div>
+                    </li>
+                    <li>
+                      <span className="process-number">3</span>
+                      <div>
+                        <h3>Choose your next move</h3>
+                        <p>
+                          Review the evidence and safer next steps. Any report export needs your
+                          approval.
+                        </p>
+                      </div>
+                    </li>
+                  </ol>
+                  <div className="empty-footer">
+                    <CheckCheck size={16} aria-hidden="true" />
+                    <span>Evidence first. Action only with your say.</span>
                   </div>
-                )}
-                {caseView.approvals.map((approval) => (
-                  <section
-                    className="approval-card"
-                    aria-labelledby={`approval-${approval.toolCallId}`}
-                    key={approval.toolCallId}
-                  >
-                    <div className="eyebrow">
-                      <LockKeyhole size={13} aria-hidden="true" />
-                      Your decision
-                    </div>
-                    <h3 id={`approval-${approval.toolCallId}`}>Allow this report export?</h3>
-                    <p>
-                      The investigation is paused at a TrueForge approval gate. Review the exact
-                      request before allowing it.
-                    </p>
-                    <dl>
-                      <div>
-                        <dt>Tool</dt>
-                        <dd>
-                          <code>{approval.toolName}</code>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Case ID</dt>
-                        <dd>
-                          <code>{caseView.id}</code>
-                        </dd>
-                      </div>
-                    </dl>
-                    <details>
-                      <summary>View exact tool arguments</summary>
-                      <pre>{approval.arguments}</pre>
-                    </details>
-                    <div className="approval-actions">
-                      <button
-                        type="button"
-                        className="primary-button"
-                        disabled={!approval.actionable || approvalBusy !== null || restoring}
-                        onClick={() => {
-                          void approve(approval.toolCallId, 'allow');
-                        }}
-                      >
-                        <Check size={16} aria-hidden="true" />
-                        {approvalBusy === approval.toolCallId
-                          ? 'Sending decision…'
-                          : 'Allow export'}
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        disabled={!approval.actionable || approvalBusy !== null || restoring}
-                        onClick={() => {
-                          void approve(approval.toolCallId, 'deny');
-                        }}
-                      >
-                        Deny export
-                      </button>
-                    </div>
-                    {!approval.actionable && (
-                      <p className="approval-wait">
-                        Waiting for the approval request to become actionable.
-                      </p>
-                    )}
-                  </section>
-                ))}
-                {caseView.exported && (
-                  <section className="export-ready" aria-label="Exported report">
+                </div>
+              ) : (
+                <div className="case-card">
+                  <div className="case-header">
                     <div>
-                      <CheckCheck size={18} aria-hidden="true" />
-                      <strong>Your evidence report is ready</strong>
+                      <span className="step-tag">02 / INVESTIGATION</span>
+                      <p className="case-id">Case {caseView.id.slice(0, 8)}</p>
                     </div>
-                    <p>
-                      After you approve, the JSON evidence downloads automatically. If it did not
-                      start, download it again below.
-                    </p>
-                    <div className="export-actions">
-                      <a
-                        className="download-link"
-                        href={`/api/cases/${encodeURIComponent(caseView.id)}/export`}
-                        download
-                      >
-                        <ArrowDownToLine size={16} aria-hidden="true" />
-                        Download again <span>JSON</span>
-                      </a>
-                      <a
-                        className="secondary-button"
-                        href={`/reports/${encodeURIComponent(caseView.id)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Print / save PDF <ExternalLink size={13} aria-hidden="true" />
-                        <span className="sr-only"> (opens in a new tab)</span>
-                      </a>
+                    <span
+                      className={`neutral-badge ${caseView.status === 'running' ? 'running-badge' : ''}`}
+                    >
+                      {caseView.status === 'running' && (
+                        <LoaderCircle size={13} className="spinner" aria-hidden="true" />
+                      )}
+                      {caseView.status === 'approval_required'
+                        ? 'Approval needed'
+                        : caseView.status === 'running'
+                          ? 'Investigating'
+                          : caseView.status === 'complete'
+                            ? 'Complete'
+                            : caseView.status === 'cancelled'
+                              ? 'Cancelled'
+                              : 'Needs attention'}
+                    </span>
+                  </div>
+                  {caseView.report ? (
+                    <InvestigationDashboard
+                      key={caseView.id}
+                      caseView={caseView}
+                      report={caseView.report}
+                    />
+                  ) : (
+                    <div className="pending-report">
+                      <Search size={27} strokeWidth={1.5} aria-hidden="true" />
+                      <h2>
+                        {caseView.status === 'error'
+                          ? 'The investigation was interrupted.'
+                          : caseView.status === 'cancelled'
+                            ? 'This investigation was cancelled.'
+                            : 'Following the evidence…'}
+                      </h2>
+                      <p>
+                        {caseView.status === 'error' || caseView.status === 'cancelled'
+                          ? 'You can start a new investigation from the message panel.'
+                          : 'Observations will appear here as the investigation progresses. You can follow each step below.'}
+                      </p>
                     </div>
-                  </section>
-                )}
-                {!caseView.report && <InvestigationActivity caseView={caseView} />}
-              </div>
-            )}
-          </section>
+                  )}
+                  {caseView.error && (
+                    <div className="error-notice" role="alert">
+                      <p>{PROVIDER_UNAVAILABLE}</p>
+                    </div>
+                  )}
+                  {caseView.approvals.map((approval) => (
+                    <section
+                      className="approval-card"
+                      aria-labelledby={`approval-${approval.toolCallId}`}
+                      key={approval.toolCallId}
+                    >
+                      <div className="eyebrow">
+                        <LockKeyhole size={13} aria-hidden="true" />
+                        Your decision
+                      </div>
+                      <h3 id={`approval-${approval.toolCallId}`}>Allow this report export?</h3>
+                      <p>
+                        The investigation is paused at a TrueForge approval gate. Review the exact
+                        request before allowing it.
+                      </p>
+                      <dl>
+                        <div>
+                          <dt>Tool</dt>
+                          <dd>
+                            <code>{approval.toolName}</code>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Case ID</dt>
+                          <dd>
+                            <code>{caseView.id}</code>
+                          </dd>
+                        </div>
+                      </dl>
+                      <details>
+                        <summary>View exact tool arguments</summary>
+                        <pre>{approval.arguments}</pre>
+                      </details>
+                      <div className="approval-actions">
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={!approval.actionable || approvalBusy !== null || restoring}
+                          onClick={() => {
+                            void approve(approval.toolCallId, 'allow');
+                          }}
+                        >
+                          <Check size={16} aria-hidden="true" />
+                          {approvalBusy === approval.toolCallId
+                            ? 'Sending decision…'
+                            : 'Allow export'}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={!approval.actionable || approvalBusy !== null || restoring}
+                          onClick={() => {
+                            void approve(approval.toolCallId, 'deny');
+                          }}
+                        >
+                          Deny export
+                        </button>
+                      </div>
+                      {!approval.actionable && (
+                        <p className="approval-wait">
+                          Waiting for the approval request to become actionable.
+                        </p>
+                      )}
+                    </section>
+                  ))}
+                  {caseView.exported && (
+                    <section className="export-ready" aria-label="Exported report">
+                      <div>
+                        <CheckCheck size={18} aria-hidden="true" />
+                        <strong>Your evidence report is ready</strong>
+                      </div>
+                      <p>
+                        After you approve, the JSON evidence downloads automatically. If it did not
+                        start, download it again below.
+                      </p>
+                      <div className="export-actions">
+                        <a
+                          className="download-link"
+                          href={`/api/cases/${encodeURIComponent(caseView.id)}/export`}
+                          download
+                        >
+                          <ArrowDownToLine size={16} aria-hidden="true" />
+                          Download again <span>JSON</span>
+                        </a>
+                        <a
+                          className="secondary-button"
+                          href={`/reports/${encodeURIComponent(caseView.id)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Print / save PDF <ExternalLink size={13} aria-hidden="true" />
+                          <span className="sr-only"> (opens in a new tab)</span>
+                        </a>
+                      </div>
+                    </section>
+                  )}
+                  {!caseView.report && <InvestigationActivity caseView={caseView} />}
+                </div>
+              )}
+            </section>
+          )}
         </div>
         <SiteFooter />
       </main>

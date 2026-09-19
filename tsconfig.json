@@ -22,6 +22,7 @@
     "scripts/**/*.ts",
     "evals/**/*.ts",
     "tests/**/*.ts",
-    "fixtures/**/*.ts"
+    "fixtures/**/*.ts",
+    "playwright.config.ts"
   ]
 }

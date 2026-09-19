@@ -25,7 +25,8 @@
     "build": "npm run build --workspace apps/web",
     "start": "npm run start --workspace apps/web",
     "check": "npm run lint && npm run typecheck && npm test && npm run eval && npm run build",
-    "eval:signals": "tsx --env-file-if-exists=.env evals/signals.ts"
+    "eval:signals": "tsx --env-file-if-exists=.env evals/signals.ts",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

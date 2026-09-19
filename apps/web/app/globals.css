@@ -226,6 +226,11 @@ h1 {
   align-items: start;
   gap: 28px;
 }
+.workbench.workbench-new {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 620px;
+  margin-inline: auto;
+}
 .input-column,
 .case-column {
   min-width: 0;

@@ -1,8 +1,52 @@
 # VerifyFirst
 
-**Evidence before action.** VerifyFirst investigates suspicious messages, links, phone numbers, email senders and claimed organizations together. It collects independent evidence, highlights contradictions, preserves uncertainty and produces an approval-gated report.
+**Evidence before action.** VerifyFirst investigates suspicious messages, links, phone numbers, email senders and claimed organizations together, then finishes an evidence-backed case report with safe next steps.
 
-The agent runs on **TrueForge 0.2.0** through its official SDK. TrueForge owns model calls, tool routing, native approvals, sandbox execution, durable sessions and traces. There is no separate agent loop or direct model-provider call in VerifyFirst.
+A chatbot can comment on wording. VerifyFirst **does the investigation**: calls external tools, compares claimed identities with independent organization references, exposes contradictions and missing evidence, and pauses for human approval before exporting. It never treats a suspicious message as instructions or calls a message-provided contact to establish trust.
+
+**TrueForge is the execution harness, not a chat wrapper.** The official SDK runs a coordinator agent, two native scoped subagents for combined identity/link cases, eight MCP tools, sandbox code execution when available, a native human-approval pause, durable sessions and inspectable traces. There is no parallel agent loop or direct model-provider call in VerifyFirst. The integration is pinned to **TrueForge 0.2.0**.
+
+```mermaid
+flowchart LR
+  UI[VerifyFirst · Next.js] --> TF[TrueForge coordinator]
+  TF --> ID[Native identity investigator]
+  TF --> LD[Native link/domain investigator]
+  TF --> SB[Sandbox · parsing and fingerprint]
+  ID --> MCP[Case-scoped MCP tools]
+  LD --> MCP
+  TF --> MCP
+  MCP --> EV[Recorded facts, signals and unknowns]
+  EV --> REPORT[Unified case dashboard]
+  TF --> APPROVAL[Native human approval]
+  APPROVAL --> EXPORT[Redacted JSON + printable report]
+  TF --- HISTORY[Durable sessions + tool/subagent traces]
+```
+
+**Verification signals:** optional IPQS phone reputation; email DNS/MX/SPF/DMARC records; URL redirects and public-network safety; domain DNS/RDAP and lookalike indicators; independent organization references; trusted anti-scam sources; prompt-injection signals. These are evidence, not proof of sender identity. No SAFE verdict or invented confidence score is produced.
+
+## The 3-minute demo
+
+With the services running and a model configured:
+
+1. **0:00–0:30 — Investigate:** open `/`, select **Urgent bank transfer scam**, and click **Investigate**. The message, fake phone, reserved URL and claimed bank fill together.
+2. **0:30–1:30 — Watch real work:** open **Activity** as results arrive. Show the coordinator, Identity and Link/Domain investigators, MCP results and actual sandbox execution. In TrueForge on port 8790, open the matching session to inspect the native trace.
+3. **1:30–2:20 — Explain the result:** show **Summary** and **Identity**. The urgent transfer request conflicts with the independently sourced bank domain. IPQS is explicitly third-party evidence; a fictional number may have little usable reputation. Missing data remains unknown.
+4. **2:20–3:00 — Finish the job:** show the native approval card, click **Allow export**, and watch JSON download automatically after completion. Open **Print / save PDF** for the human-readable evidence report. Click the logo to return to a clean new investigation.
+
+Timings are a presentation target, not a latency guarantee. All five samples are synthetic; `.example` domains intentionally do not resolve. A lookup failure alone never establishes fraud. Try **Prompt-injection phishing**, **Suspicious sender email**, **Legitimate / low-evidence message**, and **Multi-signal impersonation** to inspect the other boundaries. Each button replaces all relevant input fields; switching to the ordinary reminder clears old identity fields.
+
+![Completed synthetic bank investigation with risk, contradictions and safe actions](docs/screenshots/summary.png)
+
+<details>
+<summary>See the input, native execution activity and approval pause</summary>
+
+![Fresh investigation input](docs/screenshots/input.png)
+
+![Real TrueForge subagent and MCP activity for the synthetic bank case](docs/screenshots/activity.png)
+
+![Native TrueForge approval surfaced in VerifyFirst before report export](docs/screenshots/approval.png)
+
+</details>
 
 ## Fastest local setup
 
@@ -16,7 +60,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Open **http://127.0.0.1:8790 → Settings → Models**, configure a provider, then open **http://127.0.0.1:3000** and click **Reconnect**. Choose **The urgent bank alert**, then investigate. The first configured model is selected unless `TRUEFORGE_MODEL` names another configured model.
+Open **http://127.0.0.1:8790 → Settings → Models**, configure a provider, then open **http://127.0.0.1:3000** and click **Reconnect**. Choose **Urgent bank transfer scam**, then investigate. The first configured model is selected unless `TRUEFORGE_MODEL` names another configured model.
 
 `npm run dev` starts TrueForge on 8790, registers the private MCP connector, starts tools on 8791 and the frontend on 3000. Setup generates the MCP token. Provider settings and sessions live outside the checkout in `~/.local/share/verifyfirst/trueforge.sqlite`; case evidence lives in ignored `.data/`.
 
@@ -100,11 +144,11 @@ This is a localhost demo topology. For a shared harness, use TrueForge's [offici
 
 ## Investigation and demo flow
 
-1. Choose **The urgent bank alert**, or paste a message. A single detected link fills the editable link field; multiple links appear separately and all are investigated. Up to five distinct links are accepted. Links never open automatically.
+1. Choose **Urgent bank transfer scam**, or paste a message. A single detected link fills the editable link field; multiple links appear separately and all are investigated. Up to five distinct links are accepted. Links never open automatically.
 2. Add phone, email and a claimed organization together when available. These fields are untrusted claims; supplied contact details never become verified contacts. Use an explicit `+country code` for phone normalization.
 3. Investigate. Inspect the risk summary, meaningful signals, contradictions and recommended safe action. Deeper evidence, identity, technical checks and activity remain available without overwhelming the summary.
 4. At the native approval pause, refresh to confirm durable recovery. **Allow export** resumes TrueForge and automatically downloads the redacted JSON after completion. **Download again** is the fallback. Open the approved human report and use browser **Print / Save as PDF**.
-5. Try the injection sample and ordinary reminder. Embedded instructions must be ignored, while insufficient evidence must remain UNKNOWN/LOW EVIDENCE rather than automatic HIGH RISK.
+5. Try the injection, sender-email, ordinary-reminder and multi-signal samples. Embedded instructions must be ignored, while insufficient evidence must remain UNKNOWN/LOW EVIDENCE rather than automatic HIGH RISK.
 
 Export creates a local report; it does not contact a bank, regulator or other third party. Both JSON and printable HTML remain unavailable until approval. Activity shows real timestamps with seconds and measured call-to-result elapsed time, including scheduling and approval waits.
 
@@ -116,7 +160,7 @@ See [demo scenarios](docs/DEMO.md) and [verification procedure](docs/VERIFICATIO
 apps/web/   Next.js + TypeScript investigation UI and local API
 apps/mcp/   Eight case-scoped investigation and report tools
 agent/      TrueForge SDK integration, policy, reports and session mapping
-fixtures/   Three synthetic demo messages
+fixtures/   Five synthetic multi-signal demo samples
 evals/      Offline cases and live TrueForge scenarios
 tests/      Tool, evidence, approval, recovery and API tests
 scripts/    Local startup, container entrypoints and setup
@@ -180,6 +224,7 @@ npm start
 - Facts, suspicious signals and unknowns are labeled separately from conclusions. No SAFE verdict or invented numeric confidence is produced.
 - Official domains, HTTPS, domain age, IPQS scores and email DNS records never authenticate a sender. Email-header SPF/DKIM validation and mailbox ownership checks are not performed. Caller ID can be spoofed.
 - Unsupported organizations and unavailable sources remain unknown. The organization catalog and reference search are deliberately bounded. IPQS and other external services can be incomplete or wrong.
+- Model execution can stop early and sandbox steps can fail. Live evaluations check the approval pause and actual execution; no export is allowed without approval even when an investigation is incomplete.
 - Case/session data may contain sensitive input. Use synthetic or redacted data. Export strips common contact patterns and URL queries but is not comprehensive anonymization.
 - No accounts or tenant isolation are provided. Keep services on localhost and do not expose them through public tunnels.
 

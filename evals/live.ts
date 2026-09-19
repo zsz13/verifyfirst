@@ -9,7 +9,13 @@ const ready = await health();
 if (!ready.configured) throw new Error(`Live evaluation cannot run: ${ready.message}`);
 const summaries = [];
 for (const demo of demos) {
-  let result = await createCase({ text: demo.text, url: demo.url });
+  let result = await createCase({
+    text: demo.text,
+    url: demo.url,
+    senderPhone: demo.senderPhone,
+    senderEmail: demo.senderEmail,
+    claimedOrganization: demo.claimedOrganization,
+  });
   const deadline = Date.now() + 240_000;
   while (result.status === 'running' && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -77,5 +83,5 @@ await writeFile(resolve(dataDir, 'live-eval-summary.json'), JSON.stringify(summa
   mode: 0o600,
 });
 console.log(
-  `${summaries.length}/3 live scenarios passed. Saved local session evidence in .data/live-eval-summary.json.`,
+  `${summaries.length}/${demos.length} live scenarios passed. Saved local session evidence in .data/live-eval-summary.json.`,
 );

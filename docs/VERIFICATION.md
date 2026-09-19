@@ -8,6 +8,8 @@ Deterministic checks, live external tools and model-backed acceptance prove diff
 npm ci
 npm run check
 npm run format:check
+npx playwright install chromium
+npm run test:browser
 ```
 
 `check` runs lint, TypeScript, the test suite, offline evaluations and production build. Tests cover original-input/case binding, SSRF and redirect handling, bounded responses, evidence classification, sender/IPQS parsing and failure behavior, approval grants, export redaction and refresh recovery. Offline cases exercise uncertainty, injection signals, mismatch and denied exports without fabricating network observations.
@@ -23,11 +25,13 @@ npm run eval:live
 npm run eval:signals
 ```
 
-Live runs consume model-provider credit. The three scenarios must show:
+Live runs consume model-provider credit. The five built-in scenarios must show:
 
 - Bank alert: HIGH RISK with independent sources and organization/domain contradictions.
 - Embedded injection: detected/ignored instructions, real investigation and SUSPICIOUS or HIGH RISK.
 - Ordinary reminder: retained uncertainty, not automatic HIGH RISK.
+- Sender email: attempted mail/domain records and comparison against the claimed organization.
+- Multi-signal impersonation: phone, email and URL evidence correlated in one case.
 - Actual successful MCP calls, a native human-approval pause and completed denial without export.
 - Actual sandbox execution when TrueForge reports availability; unavailable sandbox is a limitation, not a simulated success.
 

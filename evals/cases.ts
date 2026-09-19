@@ -17,7 +17,7 @@ export const evaluationCases = [
   },
   {
     name: 'ordinary-reminder',
-    text: demos[2].text,
+    text: demos[3].text,
     injection: false,
     maxRisk: 'LOW_EVIDENCE',
     minSignal: false,

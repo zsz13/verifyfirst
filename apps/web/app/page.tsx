@@ -602,9 +602,9 @@ export default function Home() {
                       const links = extractMessageUrls(demo.text);
                       setUrl(demo.url || (links.length === 1 ? (links[0] ?? '') : ''));
                       setUrlMode('detected');
-                      setSenderPhone('');
-                      setSenderEmail('');
-                      setClaimedOrganization('');
+                      setSenderPhone(demo.senderPhone);
+                      setSenderEmail(demo.senderEmail);
+                      setClaimedOrganization(demo.claimedOrganization);
                       setFormError('');
                       setError('');
                       textArea.current?.focus();

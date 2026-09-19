@@ -11,3 +11,4 @@ playwright-report/
 .DS_Store
 /apps/web/*.md
 *.local.md
+/verifyfirst-demo-guide.md

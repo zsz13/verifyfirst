@@ -26,8 +26,10 @@ export default function HowItWorks() {
               <p>
                 We extract links, claimed organizations, sender details and requests. Domain and URL
                 tools check public DNS, available registration data, redirects and lookalike
-                signals. Email checks add mail-domain records; phone checks identify format and
-                country when possible.
+                signals. Email checks add mail-domain records. Phone checks use optional
+                IPQualityScore reputation data alongside local format and country information. You
+                can supply a message, multiple links, phone, email and claimed organization in one
+                case.
               </p>
             </section>
             <section>
@@ -70,9 +72,10 @@ export default function HowItWorks() {
             <p>
               Use synthetic or redacted content. Investigations are stored locally and submitted
               content reaches your configured model provider. DNS, registration and official-source
-              requests reach external services. Export requires approval and redacts common contact
-              patterns, but automated redaction cannot catch every personal detail. Review a report
-              before sharing it.
+              requests reach external services. When IPQualityScore is configured, the supplied
+              phone number is sent to that reputation provider. Export requires approval and redacts
+              common contact patterns, but automated redaction cannot catch every personal detail.
+              Review a report before sharing it.
             </p>
           </section>
           <section className="info-limitations">
@@ -83,7 +86,8 @@ export default function HowItWorks() {
               </li>
               <li>
                 Domain age, DNS records and valid phone formatting are signals, not proof of trust
-                or fraud.
+                or fraud. A third-party phone reputation score is not proof that a caller is
+                fraudulent or trustworthy.
               </li>
               <li>
                 Sources can be unavailable or outdated; missing results stay unknown. Coverage is

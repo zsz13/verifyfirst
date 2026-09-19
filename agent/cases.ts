@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile, rename, access, link, unlink } from 'node:f
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
-import { dataDir, harnessClient } from './config.ts';
+import { dataDir, harnessClient, mcpUrl } from './config.ts';
 import { investigationSpec } from './policy.ts';
 import { extractMessageUrls, MAX_INVESTIGATION_URLS } from './input.ts';
 import {
@@ -27,10 +27,21 @@ export const submissionSchema = z
     text: z.string().trim().max(12000).default(''),
     url: z.string().trim().max(2048).default(''),
     sender: z.string().trim().max(320).default(''),
+    senderPhone: z.string().trim().max(80).optional(),
+    senderEmail: z.string().trim().max(320).optional(),
+    claimedOrganization: z.string().trim().max(120).optional(),
   })
   .refine(
-    (value) => value.text.length + value.url.length + value.sender.length > 0,
-    'Add a message, link, or sender to investigate.',
+    (value) =>
+      [
+        value.text,
+        value.url,
+        value.sender,
+        value.senderPhone,
+        value.senderEmail,
+        value.claimedOrganization,
+      ].some((item) => Boolean(item)),
+    'Add a message, link, sender, or claimed organization to investigate.',
   )
   .refine(
     (value) =>
@@ -66,7 +77,7 @@ export async function health(): Promise<HealthView> {
   const [models, capabilities, mcp] = await Promise.allSettled([
     client.models.list(),
     client.server.getCapabilities(),
-    fetch(`http://127.0.0.1:${process.env.MCP_PORT || '8791'}/health`, {
+    fetch(new URL('/health', mcpUrl), {
       signal: AbortSignal.timeout(1500),
     }),
   ]);
@@ -117,7 +128,7 @@ export async function createCase(input: unknown): Promise<CaseView> {
       name: `verifyfirst-${id}`,
       type: 'remote',
       description: 'Investigation tools restricted to this case.',
-      url: `http://127.0.0.1:${process.env.MCP_PORT || '8791'}/mcp`,
+      url: mcpUrl,
       auth: {
         type: 'header',
         headers: { Authorization: `Bearer ${token}`, 'X-VerifyFirst-Case': id },
@@ -125,7 +136,15 @@ export async function createCase(input: unknown): Promise<CaseView> {
     },
   });
   const { data: session } = await client.sessions.create({
-    agent: { spec: investigationSpec(ready.model, ready.sandbox, id) },
+    agent: {
+      spec: investigationSpec(
+        ready.model,
+        ready.sandbox,
+        id,
+        Boolean(submission.sender || submission.senderPhone || submission.senderEmail) &&
+          Boolean(submission.url || extractMessageUrls(submission.text).length),
+      ),
+    },
   });
   const { data: turn } = await client.sessions.createTurn(session.id, {
     input: [
@@ -304,7 +323,14 @@ function activity(events: TrueForgeApi.SessionEvent[], caseId: string): Activity
     ),
   );
   return events.flatMap((event): Activity[] => {
-    const base = { id: event.id, type: event.type, timestamp: event.createdAt };
+    const base = {
+      id: event.id,
+      type: event.type,
+      timestamp: event.createdAt,
+      ...('threadId' in event && typeof event.threadId === 'string'
+        ? { threadId: event.threadId }
+        : {}),
+    };
     if (event.type === 'model.message')
       return (event.toolCalls ?? []).map((call) => {
         const tool = normalizeTool(call, caseId);
@@ -341,6 +367,29 @@ function activity(events: TrueForgeApi.SessionEvent[], caseId: string): Activity
                 success: successfulResponse(event.content),
               }
             : {}),
+        },
+      ];
+    }
+    if (event.type === 'thread.created')
+      return [
+        {
+          ...base,
+          label: event.agentInfo.name,
+          detail: 'TrueForge subagent started an independent investigation.',
+        },
+      ];
+    if (event.type === 'thread.done' && event.parent) {
+      const started = events.find(
+        (item) => item.type === 'thread.created' && item.threadId === event.threadId,
+      );
+      const elapsed = started ? Date.parse(event.createdAt) - Date.parse(started.createdAt) : NaN;
+      return [
+        {
+          ...base,
+          label: `${event.title} ${event.state.status === 'error' ? 'failed' : 'completed'}`,
+          detail: 'Subagent result returned to the TrueForge coordinator.',
+          success: event.state.status !== 'error',
+          ...(Number.isFinite(elapsed) && elapsed >= 0 ? { durationMs: elapsed } : {}),
         },
       ];
     }

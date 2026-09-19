@@ -24,7 +24,8 @@
     "eval:live": "tsx --env-file-if-exists=.env evals/live.ts",
     "build": "npm run build --workspace apps/web",
     "start": "npm run start --workspace apps/web",
-    "check": "npm run lint && npm run typecheck && npm test && npm run eval && npm run build"
+    "check": "npm run lint && npm run typecheck && npm test && npm run eval && npm run build",
+    "eval:signals": "tsx --env-file-if-exists=.env evals/signals.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

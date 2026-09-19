@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { reportSchema } from '../agent/types.ts';
 import { validateToolCase } from '../apps/mcp/src/server.ts';
 import { tmpdir } from 'node:os';
@@ -57,6 +57,12 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   await rm(directory, { recursive: true, force: true });
+});
+
+it('uses the same default case store when the example data-directory setting is blank', () => {
+  vi.stubEnv('VERIFYFIRST_DATA_DIR', '');
+  const id = randomUUID();
+  expect(caseDir(id)).toBe(resolve('.data', 'cases', id));
 });
 
 describe('MCP connector case scope', () => {

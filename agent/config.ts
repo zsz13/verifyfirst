@@ -11,6 +11,8 @@ export const dataDir = resolve(
   /* turbopackIgnore: true */ process.env.VERIFYFIRST_DATA_DIR || resolve(projectRoot, '.data'),
 );
 export const harnessUrl = process.env.TRUEFORGE_BASE_URL || 'http://127.0.0.1:8790';
+export const mcpUrl =
+  process.env.VERIFYFIRST_MCP_URL || `http://127.0.0.1:${process.env.MCP_PORT || '8791'}/mcp`;
 export function harnessClient() {
   return new TrueForge({
     baseUrl: harnessUrl,

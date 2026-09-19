@@ -1,7 +1,7 @@
 import { extractMessageUrls } from '../../../agent/input.ts';
 import { parse } from 'tldts';
 import { domainToASCII, domainToUnicode } from 'node:url';
-import { parseSender } from './sender.ts';
+import { parseSender, suppliedSenders, type SuppliedIdentities } from './sender.ts';
 
 export const ORGANIZATIONS = [
   {
@@ -79,8 +79,14 @@ export interface SubmissionAnalysis {
   injectionDetected: boolean;
   injectionIndicators: string[];
 }
-export function analyzeText(text: string, suppliedUrl = '', sender = ''): SubmissionAnalysis {
-  const senderIdentity = parseSender(sender);
+export function analyzeText(
+  text: string,
+  suppliedUrl = '',
+  sender: string | SuppliedIdentities = '',
+): SubmissionAnalysis {
+  const identities = typeof sender === 'string' ? { sender } : sender;
+  const senders = suppliedSenders(identities);
+  const senderIdentities = senders.map(parseSender);
   const urls = [...new Set([...extractMessageUrls(text), ...(suppliedUrl ? [suppliedUrl] : [])])];
   const bareDomains =
     text.match(
@@ -91,7 +97,9 @@ export function analyzeText(text: string, suppliedUrl = '', sender = ''): Submis
       [
         ...urls,
         ...bareDomains,
-        ...(senderIdentity.kind === 'email' ? [senderIdentity.domain] : []),
+        ...senderIdentities.flatMap((identity) =>
+          identity.kind === 'email' ? [identity.domain] : [],
+        ),
       ].flatMap((value) => {
         try {
           return [normalizeDomain(value)];
@@ -143,11 +151,13 @@ export function analyzeText(text: string, suppliedUrl = '', sender = ''): Submis
     .filter(([pattern]) => pattern.test(text))
     .map(([, label]) => label);
   return {
-    senderProvided: Boolean(sender.trim()),
+    senderProvided: senders.length > 0,
     urls,
     domains,
     organizations: ORGANIZATIONS.filter((org) =>
-      org.aliases.some((alias) => new RegExp(`\\b${alias}\\b`, 'i').test(text)),
+      org.aliases.some((alias) =>
+        new RegExp(`\\b${alias}\\b`, 'i').test(`${text} ${identities.claimedOrganization ?? ''}`),
+      ),
     ).map((org) => org.name),
     phoneNumbers: text.match(/(?:\+?\d[\d ().-]{7,}\d)/g)?.slice(0, 10) ?? [],
     requestedActions,

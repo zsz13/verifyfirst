@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
-import { dataDir, harnessClient, projectRoot } from '../agent/config.ts';
+import { dataDir, harnessClient, projectRoot, mcpUrl } from '../agent/config.ts';
 
 export async function setup() {
   if (process.env.VERIFYFIRST_ENV_FILE) loadEnvFile(process.env.VERIFYFIRST_ENV_FILE);
@@ -30,7 +30,7 @@ export async function setup() {
       name: 'verifyfirst',
       type: 'remote',
       description: 'Read-only scam evidence investigation and human-approved report export.',
-      url: `http://127.0.0.1:${process.env.MCP_PORT || '8791'}/mcp`,
+      url: mcpUrl,
       auth: { type: 'header', headers: { Authorization: `Bearer ${token}` } },
     },
   });

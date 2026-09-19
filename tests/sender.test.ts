@@ -13,6 +13,7 @@ import {
   executeTool,
   inspectSender,
   inspectUrl,
+  verifyOrganization,
 } from '../apps/mcp/src/tools.ts';
 import {
   caseDir,
@@ -47,6 +48,8 @@ let directory: string;
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'verifyfirst-sender-'));
   vi.stubEnv('VERIFYFIRST_DATA_DIR', directory);
+  vi.stubEnv('IPQS_API_KEY', '');
+  vi.stubEnv('IPQS_API_KEY_FILE', '');
   resolve4.mockReset().mockResolvedValue(['93.184.216.34']);
   resolve6.mockReset().mockResolvedValue([]);
   resolveMx.mockReset().mockResolvedValue([{ priority: 10, exchange: 'mail.example.com' }]);
@@ -55,6 +58,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await rm(directory, { recursive: true, force: true });
 });
 async function original(sender: string, text = '') {
@@ -293,5 +297,173 @@ describe('harness URL coverage gate and sender export', () => {
     expect(JSON.stringify(exported)).not.toContain(number);
     if (!exported) throw new Error('Missing approved export');
     expect(renderReportHtml(exported)).not.toContain(number);
+  });
+});
+
+describe('unified identity and organization checks', () => {
+  it('correlates phone, email, all links and explicit organization in one original case', async () => {
+    const caseId = randomUUID();
+    await saveJson(caseId, 'submission.json', {
+      text: 'Urgent: transfer money now. https://first.example https://second.example',
+      senderPhone: '+1 202 555 0147',
+      senderEmail: 'private@sender.example',
+      claimedOrganization: 'Chase',
+    });
+    const analysis = await analyzeSubmission({ caseId, text: '' });
+    expect(analysis.organizations).toContain('Chase');
+    expect(analysis.domains).toEqual(
+      expect.arrayContaining(['first.example', 'second.example', 'sender.example']),
+    );
+    vi.stubEnv('IPQS_API_KEY', 'unit-test-credential');
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ success: true, fraud_score: 0, risky: false })),
+        ),
+    );
+    const result = await inspectSender({ caseId });
+    expect(result.senders.map((sender) => sender.kind)).toEqual(['phone', 'email']);
+    expect(result.evidence.some((item) => item.title === 'IPQS third-party phone reputation')).toBe(
+      true,
+    );
+    await verifyOrganization({ caseId, organization: 'Chase' });
+    await record(
+      caseId,
+      'search_trusted_sources',
+      'unknown',
+      'Source unavailable',
+      'No conclusion.',
+    );
+    const report = (await createCaseReport({ caseId })).report;
+    expect(report.comparisons.map((item) => item.submitted)).toEqual(
+      expect.arrayContaining(['first.example', 'second.example', 'sender.example']),
+    );
+    expect(report.risk).toBe('HIGH_RISK');
+    expect(JSON.stringify(result)).not.toContain('private@');
+  });
+  it('never promotes phone reputation alone to HIGH_RISK and survives provider failure', async () => {
+    vi.stubEnv('IPQS_API_KEY', 'unit-test-credential');
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ success: true, fraud_score: 100, risky: true, spammer: true }),
+          ),
+        )
+        .mockRejectedValueOnce(new Error('provider unavailable')),
+    );
+    for (const expected of ['SUSPICIOUS', 'UNKNOWN']) {
+      const caseId = await original('+12025550147');
+      await inspectSender({ caseId });
+      await record(
+        caseId,
+        'search_trusted_sources',
+        'unknown',
+        'Source unavailable',
+        'No conclusion.',
+      );
+      expect((await createCaseReport({ caseId })).report.risk).toBe(expected);
+    }
+  });
+  it('requires every identity check to finish, even if partial sender evidence exists', async () => {
+    const caseId = await original('+12025550147');
+    await record(
+      caseId,
+      'inspect_sender',
+      'verified_fact',
+      'Phone numbering-plan observation',
+      'Partial check only',
+    );
+    await record(
+      caseId,
+      'search_trusted_sources',
+      'unknown',
+      'Source unavailable',
+      'No conclusion.',
+    );
+    await expect(createCaseReport({ caseId })).rejects.toMatchObject({
+      code: 'SENDER_CHECK_REQUIRED',
+    });
+  });
+});
+
+it('presents readable low-risk IPQS observations while preserving phone-only uncertainty', async () => {
+  vi.stubEnv('IPQS_API_KEY', 'unit-test-credential');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          fraud_score: 0,
+          valid: true,
+          recent_abuse: false,
+          active: null,
+        }),
+      ),
+    ),
+  );
+  const caseId = await original('+12025550147');
+  const result = await inspectSender({ caseId });
+  const observation = result.evidence.find(
+    (item) => item.title === 'IPQS third-party phone reputation',
+  );
+  expect(observation?.detail).toContain('Fraud score: 0/100; Valid: yes; Active: unknown');
+  expect(observation?.detail).toContain('Recent abuse: no');
+  expect(result.phoneReputations).toContainEqual(
+    expect.objectContaining({
+      status: 'available',
+      signals: { fraud_score: 0, valid: true, recent_abuse: false, active: null },
+    }),
+  );
+  await record(caseId, 'search_trusted_sources', 'unknown', 'Source unavailable', 'No conclusion.');
+  const report = (await createCaseReport({ caseId })).report;
+  expect(report.risk).toBe('LOW_EVIDENCE');
+  expect(report.limitations).not.toContain('No independent external facts were retrieved.');
+  expect(report.summary).toContain('not enough evidence to authenticate the sender');
+});
+
+it('does not manufacture contradictions between co-mentioned official organizations', async () => {
+  const caseId = randomUUID();
+  const text =
+    'Chase and PayPal security information: https://www.chase.com and https://www.paypal.com';
+  await saveJson(caseId, 'submission.json', { text, senderEmail: 'support@paypal.com' });
+  await analyzeSubmission({ caseId, text });
+  await inspectSender({ caseId });
+  for (const organization of ['Chase', 'PayPal']) {
+    const result = await verifyOrganization({ caseId, organization });
+    expect(result).toMatchObject({ matched: true, allMatched: true });
+    expect(result.evidence.some((item) => item.title === 'Organization domain mismatch')).toBe(
+      false,
+    );
+  }
+  await record(caseId, 'search_trusted_sources', 'unknown', 'Source unavailable', 'No conclusion.');
+  const report = (await createCaseReport({ caseId })).report;
+  expect(report.risk).toBe('LOW_EVIDENCE');
+  expect(report.evidence.some((item) => item.title === 'Organization domain mismatch')).toBe(false);
+  expect(report.comparisons.every((item) => item.submitted.endsWith(item.verified))).toBe(true);
+});
+
+it('keeps unexpected links visible and returns selected versus aggregate match honestly', async () => {
+  const caseId = randomUUID();
+  const text = 'Chase information: https://unexpected.example https://www.chase.com';
+  await saveJson(caseId, 'submission.json', { text });
+  await analyzeSubmission({ caseId, text });
+  const result = await verifyOrganization({
+    caseId,
+    organization: 'Chase',
+    submittedDomain: 'www.chase.com',
+  });
+  expect(result).toMatchObject({ matched: true, allMatched: false });
+  const mismatch = result.evidence.find((item) => item.title === 'Organization domain mismatch');
+  expect(mismatch?.detail).toContain('unexpected.example');
+  expect(mismatch?.detail).toContain('relationship to the organization remains unverified');
+  expect(await verifyOrganization({ caseId, organization: 'Chase' })).toMatchObject({
+    matched: false,
+    allMatched: false,
   });
 });

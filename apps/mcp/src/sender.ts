@@ -64,3 +64,19 @@ export function parseSender(raw: string): SenderIdentity {
     ...(numberType ? { numberType } : {}),
   };
 }
+
+export interface SuppliedIdentities {
+  sender?: string;
+  senderPhone?: string;
+  senderEmail?: string;
+  claimedOrganization?: string;
+}
+export function suppliedSenders(input: SuppliedIdentities): string[] {
+  return [
+    ...new Set(
+      [input.senderPhone, input.senderEmail, input.sender]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => value.trim()),
+    ),
+  ];
+}

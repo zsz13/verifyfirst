@@ -9,6 +9,7 @@ export const evidenceSchema = z.object({
   sourceUrl: z.string().optional(),
   observedAt: z.string(),
   tool: z.string(),
+  provenance: z.literal('third_party').optional(),
 });
 export const reportSchema = z.object({
   caseId: caseIdSchema,
@@ -33,6 +34,7 @@ export interface Activity {
   timestamp: string;
   /** Elapsed call-to-result time from harness timestamps, including queue/approval waits. */
   durationMs?: number;
+  threadId?: string;
   toolName?: string;
   toolKind?: 'mcp' | 'native';
   success?: boolean;

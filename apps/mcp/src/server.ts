@@ -115,8 +115,9 @@ function startServer(): void {
     response.status(405).json({ error: 'Use POST for this stateless MCP transport' });
   });
   const port = Number(process.env.MCP_PORT ?? 8791);
-  app.listen(port, '127.0.0.1', () => {
-    console.log(`VerifyFirst MCP listening on 127.0.0.1:${port}`);
+  const host = process.env.MCP_HOST || '127.0.0.1';
+  app.listen(port, host, () => {
+    console.log(`VerifyFirst MCP listening on ${host}:${port}`);
   });
 }
 

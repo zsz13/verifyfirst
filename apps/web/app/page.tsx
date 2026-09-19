@@ -7,7 +7,6 @@ import {
   Check,
   CheckCheck,
   ChevronRight,
-  CircleHelp,
   ExternalLink,
   Fingerprint,
   Link2,
@@ -17,9 +16,12 @@ import {
   ShieldAlert,
   X,
 } from 'lucide-react';
-import type { CaseReport, CaseView, HealthView } from '../../../agent/types';
+import type { CaseView, HealthView } from '../../../agent/types';
 import { BrandMark, SiteFooter, SiteHeader } from './components/site-chrome';
-import { formatElapsed } from './components/input-helpers';
+import {
+  InvestigationDashboard,
+  InvestigationActivity,
+} from './components/investigation-dashboard';
 import { extractMessageUrls, MAX_INVESTIGATION_URLS } from '../../../agent/input';
 import { demos } from '../../../fixtures/demos';
 
@@ -28,13 +30,6 @@ const CASE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROVIDER_UNAVAILABLE =
   'The investigation provider is unavailable. Check your model connection in TrueForge, then try again.';
-const riskLabels: Record<CaseReport['risk'], string> = {
-  HIGH_RISK: 'High risk',
-  SUSPICIOUS: 'Suspicious',
-  LOW_EVIDENCE: 'Limited evidence',
-  UNKNOWN: 'Unknown',
-};
-
 function restorableCaseId(fallback?: string): string | null {
   const linked = new URL(window.location.href).searchParams.get('case');
   if (linked && CASE_ID_PATTERN.test(linked)) return linked;
@@ -67,136 +62,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Connection interrupted. Please try again.';
 }
 
-function SourceLink({ url }: { url?: string }) {
-  if (!url) return null;
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-  return (
-    <a className="source-link" href={parsed.href} target="_blank" rel="noopener noreferrer">
-      {parsed.hostname}
-      <ExternalLink size={12} aria-hidden="true" />
-      <span className="sr-only"> (opens in a new tab)</span>
-    </a>
-  );
-}
-
-function Report({ report }: { report: CaseReport }) {
-  return (
-    <>
-      <div className={`verdict verdict-${report.risk.toLowerCase()}`}>
-        <div className="verdict-top">
-          <span className="eyebrow">Evidence assessment</span>
-          <span className="risk-label">
-            <ShieldAlert size={15} aria-hidden="true" />
-            {riskLabels[report.risk]}
-          </span>
-        </div>
-        <h2>
-          {report.risk === 'HIGH_RISK'
-            ? 'Pause before you proceed.'
-            : report.risk === 'SUSPICIOUS'
-              ? 'There are reasons to be cautious.'
-              : 'Keep the uncertainty in view.'}
-        </h2>
-        <p>{report.summary}</p>
-      </div>
-      {report.injectionDetected && (
-        <div className="injection-warning">
-          <ShieldAlert size={19} aria-hidden="true" />
-          <div>
-            <strong>Instructions hidden in the message</strong>
-            <p>
-              The submitted content contains an attempt to influence the investigation. Treat it as
-              untrusted evidence.
-            </p>
-          </div>
-        </div>
-      )}
-      <section className="report-section" aria-labelledby="evidence-title">
-        <div className="section-heading">
-          <h3 id="evidence-title">The evidence trail</h3>
-          <span className="count-label">{report.evidence.length} observations</span>
-        </div>
-        <ol className="evidence-list">
-          {report.evidence.map((item, index) => (
-            <li className={`evidence-item evidence-${item.kind}`} key={item.id}>
-              <span className="evidence-marker" aria-hidden="true">
-                {String(index + 1).padStart(2, '0')}
-              </span>
-              <div className="evidence-body">
-                <span className="evidence-kind">
-                  {item.kind === 'verified_fact'
-                    ? 'Verified fact'
-                    : item.kind === 'suspicious_signal'
-                      ? 'Suspicious signal'
-                      : 'Still unknown'}
-                </span>
-                <h4>{item.title}</h4>
-                <p>{item.detail}</p>
-                <SourceLink url={item.sourceUrl} />
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-      {report.comparisons.length > 0 && (
-        <section className="report-section" aria-labelledby="comparison-title">
-          <h3 id="comparison-title">A closer look at the domains</h3>
-          <div className="domain-comparisons">
-            {report.comparisons.map((comparison, index) => (
-              <div className="domain-pair" key={index}>
-                <div>
-                  <span className="eyebrow">Submitted</span>
-                  <code>{comparison.submitted}</code>
-                </div>
-                <ArrowRight size={16} aria-hidden="true" />
-                <div>
-                  <span className="eyebrow">Independent reference</span>
-                  <code>{comparison.verified}</code>
-                  <SourceLink url={comparison.sourceUrl} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      <section className="report-section" aria-labelledby="next-actions-title">
-        <h3 id="next-actions-title">Your safest next steps</h3>
-        <ul className="safe-actions">
-          {report.safeNextActions.map((action, index) => (
-            <li key={index}>
-              <Check size={16} aria-hidden="true" />
-              <span>{action}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-      {report.limitations.length > 0 && (
-        <details className="limitations">
-          <summary>
-            <CircleHelp size={15} aria-hidden="true" />
-            What this investigation cannot establish
-          </summary>
-          <ul>
-            {report.limitations.map((limitation, index) => (
-              <li key={index}>{limitation}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </>
-  );
-}
-
 export default function Home() {
   const [text, setText] = useState('');
   const [url, setUrl] = useState('');
-  const [sender, setSender] = useState('');
+  const [senderPhone, setSenderPhone] = useState('');
+  const [senderEmail, setSenderEmail] = useState('');
+  const [claimedOrganization, setClaimedOrganization] = useState('');
   const [urlMode, setUrlMode] = useState<'detected' | 'manual'>('detected');
   const [formError, setFormError] = useState('');
   const detectedUrls = extractMessageUrls(text);
@@ -360,8 +231,14 @@ export default function Home() {
   const investigate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submissionLock.current || recoveryLock.current || restoring) return;
-    if (!text.trim() && !url.trim() && !sender.trim()) {
-      setFormError('Add a message, link or sender to investigate.');
+    if (
+      !text.trim() &&
+      !url.trim() &&
+      !senderPhone.trim() &&
+      !senderEmail.trim() &&
+      !claimedOrganization.trim()
+    ) {
+      setFormError('Add a message, link, sender or organization to investigate.');
       return;
     }
     const links = new Set([...detectedUrls, ...extractMessageUrls(url)]);
@@ -384,7 +261,9 @@ export default function Home() {
           // Detected links are already in the immutable message. Avoid duplicating
           // long links into the shorter optional manual-URL field.
           url: urlMode === 'manual' ? url.trim() || undefined : undefined,
-          sender: sender.trim() || undefined,
+          senderPhone: senderPhone.trim() || undefined,
+          senderEmail: senderEmail.trim() || undefined,
+          claimedOrganization: claimedOrganization.trim() || undefined,
         }),
       });
       caseGeneration.current += 1;
@@ -629,30 +508,63 @@ export default function Home() {
                     the investigation.
                   </p>
                 )}
-                <label htmlFor="sender">
-                  Sender / identity <span>optional</span>
-                </label>
-                <input
-                  className="sender-input"
-                  id="sender"
-                  type="text"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={sender}
-                  onChange={(event) => {
-                    setSender(event.target.value);
-                    setFormError('');
-                  }}
-                  placeholder="Email address or phone with country code"
-                  maxLength={320}
-                  disabled={busy}
-                  aria-describedby="sender-help"
-                />
-                <p id="sender-help" className="field-note">
-                  Formatting and domain checks are evidence signals, not proof of identity.
-                </p>
+                <fieldset className="identity-fields" aria-describedby="sender-help">
+                  <legend>
+                    Sender details <span>optional · combine any fields</span>
+                  </legend>
+                  <label htmlFor="sender-phone">Phone number</label>
+                  <input
+                    className="sender-input"
+                    id="sender-phone"
+                    type="tel"
+                    autoComplete="off"
+                    value={senderPhone}
+                    onChange={(event) => {
+                      setSenderPhone(event.target.value);
+                      setFormError('');
+                    }}
+                    placeholder="+1 202 555 0123"
+                    maxLength={80}
+                    disabled={busy}
+                  />
+                  <label htmlFor="sender-email">Email address</label>
+                  <input
+                    className="sender-input"
+                    id="sender-email"
+                    type="email"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={senderEmail}
+                    onChange={(event) => {
+                      setSenderEmail(event.target.value);
+                      setFormError('');
+                    }}
+                    placeholder="sender@example.com"
+                    maxLength={320}
+                    disabled={busy}
+                  />
+                  <label htmlFor="claimed-organization">Claimed organization</label>
+                  <input
+                    className="sender-input"
+                    id="claimed-organization"
+                    type="text"
+                    autoComplete="off"
+                    value={claimedOrganization}
+                    onChange={(event) => {
+                      setClaimedOrganization(event.target.value);
+                      setFormError('');
+                    }}
+                    placeholder="For example, Chase"
+                    maxLength={160}
+                    disabled={busy}
+                  />
+                  <p id="sender-help" className="field-note">
+                    Add the details you have. Phone reputation, email records and official
+                    references are checked together; none proves identity on its own.
+                  </p>
+                </fieldset>
                 <p id="form-help" className="form-help">
-                  A message, link or sender is enough to begin.
+                  A message, link, sender or organization is enough to begin.
                 </p>
                 {formError && (
                   <p className="form-error" role="alert">
@@ -681,7 +593,8 @@ export default function Home() {
                 <p id="privacy-note" className="privacy-note">
                   <LockKeyhole size={12} aria-hidden="true" />
                   Use synthetic or redacted data. Submitted content is sent to your configured model
-                  provider. Suspicious links never open automatically.
+                  provider. When configured, IPQS receives the supplied phone number. Suspicious
+                  links never open automatically.
                 </p>
               </form>
             </section>
@@ -702,7 +615,9 @@ export default function Home() {
                       const links = extractMessageUrls(demo.text);
                       setUrl(demo.url || (links.length === 1 ? (links[0] ?? '') : ''));
                       setUrlMode('detected');
-                      setSender('');
+                      setSenderPhone('');
+                      setSenderEmail('');
+                      setClaimedOrganization('');
                       setFormError('');
                       setError('');
                       textArea.current?.focus();
@@ -827,7 +742,11 @@ export default function Home() {
                   </span>
                 </div>
                 {caseView.report ? (
-                  <Report report={caseView.report} />
+                  <InvestigationDashboard
+                    key={caseView.id}
+                    caseView={caseView}
+                    report={caseView.report}
+                  />
                 ) : (
                   <div className="pending-report">
                     <Search size={27} strokeWidth={1.5} aria-hidden="true" />
@@ -946,77 +865,7 @@ export default function Home() {
                     </div>
                   </section>
                 )}
-                <section className="activity-section" aria-labelledby="activity-title">
-                  <div className="section-heading">
-                    <h3 id="activity-title">Investigation activity</h3>
-                    <span className="count-label">TRUEFORGE</span>
-                  </div>
-                  <ol className="activity-list">
-                    {caseView.activity.map((activity) => (
-                      <li
-                        key={activity.id}
-                        className={`activity-${activity.type.includes('approval') ? 'approval' : (activity.toolKind ?? 'harness')}`}
-                      >
-                        <span className="activity-dot" aria-hidden="true" />
-                        <div>
-                          <span className="activity-kind">
-                            {activity.type.includes('approval')
-                              ? 'Approval'
-                              : activity.label.toLowerCase().includes('sandbox') ||
-                                  activity.toolName?.includes('exec')
-                                ? 'Sandbox'
-                                : activity.toolKind === 'mcp'
-                                  ? 'MCP tool'
-                                  : 'TrueForge'}
-                            {activity.type.includes('response')
-                              ? activity.success === false
-                                ? ' · Failed result'
-                                : ' · Result'
-                              : activity.type === 'model.message' && Boolean(activity.toolName)
-                                ? ' · Call'
-                                : ''}
-                          </span>
-                          <strong>{activity.label}</strong>
-                          <p>{activity.detail}</p>
-                        </div>
-                        <time dateTime={activity.timestamp}>
-                          {new Date(activity.timestamp).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                          })}
-                          {activity.durationMs !== undefined && (
-                            <span className="activity-duration">
-                              {' '}
-                              · {formatElapsed(activity.durationMs)} elapsed
-                            </span>
-                          )}
-                        </time>
-                      </li>
-                    ))}
-                  </ol>
-                  <details className="session-details">
-                    <summary>Session details</summary>
-                    <dl>
-                      <div>
-                        <dt>Case</dt>
-                        <dd>{caseView.id}</dd>
-                      </div>
-                      <div>
-                        <dt>Session</dt>
-                        <dd>{caseView.sessionId || 'Starting…'}</dd>
-                      </div>
-                      <div>
-                        <dt>Turn</dt>
-                        <dd>{caseView.turnId || 'Starting…'}</dd>
-                      </div>
-                      <div>
-                        <dt>Sandbox executed</dt>
-                        <dd>{caseView.sandboxExecuted ? 'Yes' : 'No'}</dd>
-                      </div>
-                    </dl>
-                  </details>
-                </section>
+                {!caseView.report && <InvestigationActivity caseView={caseView} />}
               </div>
             )}
           </section>

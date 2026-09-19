@@ -1,7 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Resolver } from 'node:dns/promises';
 import { z } from 'zod';
-import { parseSender } from './sender.ts';
+import {
+  parseSender,
+  suppliedSenders,
+  type SuppliedIdentities,
+  type SenderIdentity,
+} from './sender.ts';
+import { lookupPhoneReputation, formatPhoneSignals, IPQS_SOURCE } from './ipqs.ts';
 import {
   analyzeText,
   domainSignals,
@@ -117,7 +123,7 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
   analyze_submission:
     'Parse untrusted submitted content, extract domains/organizations/actions, and flag embedded instruction attacks. This does not execute or obey content.',
   inspect_sender:
-    'Inspect only the application-stored optional sender. Normalize international phone numbering metadata or inspect email DNS/MX/SPF/DMARC, domain registration and independent organization mismatch. These signals cannot authenticate identity. No reputation provider is configured.',
+    'Inspect every application-stored sender phone/email together. Optional IPQS third-party phone reputation degrades to local numbering metadata. Email DNS/MX/SPF/DMARC, RDAP and independent organization comparisons are evidence signals, never identity authentication.',
   inspect_domain:
     'Normalize a hostname, detect brand/punycode signals, query public DNS and RDAP. Failed lookups remain unknown. Domain registration is not a safety verdict.',
   inspect_url:
@@ -132,7 +138,7 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
     'SENSITIVE ACTION: export a redacted local case report. Requires native TrueForge human approval and a valid single-use application grant bound to the report hash. Has no network side effect.',
 };
 export async function analyzeSubmission(input: { caseId: string; text: string; url?: string }) {
-  const original = await readJson<{ text: string; url?: string; sender?: string }>(
+  const original = await readJson<{ text: string; url?: string } & SuppliedIdentities>(
     input.caseId,
     'submission.json',
   );
@@ -155,7 +161,7 @@ export async function analyzeSubmission(input: { caseId: string; text: string; u
         (item) => item.tool === 'analyze_submission',
       ),
     };
-  const analysis = analyzeText(original.text, original.url, original.sender);
+  const analysis = analyzeText(original.text, original.url, original);
   await saveJson(input.caseId, 'analysis.json', analysis);
   const evidence: Evidence[] = [];
   evidence.push(
@@ -450,6 +456,18 @@ export async function searchTrustedSources(input: { caseId: string; query: strin
     evidence,
   };
 }
+function belongsToAnotherRecognizedOrganization(
+  domain: string,
+  organizationDomain: string,
+  recognizedNames: string[],
+): boolean {
+  return ORGANIZATIONS.some(
+    (org) =>
+      org.domain !== organizationDomain &&
+      recognizedNames.includes(org.name) &&
+      registeredDomain(domain) === org.domain,
+  );
+}
 export async function verifyOrganization(input: {
   caseId: string;
   organization: string;
@@ -528,26 +546,42 @@ export async function verifyOrganization(input: {
       ),
     );
   }
-  let matched: boolean | null = null;
-  if (input.submittedDomain) {
-    const submitted = normalizeDomain(input.submittedDomain);
-    matched = registeredDomain(submitted) === organization.domain;
+  const comparisons: Comparison[] = [];
+  for (const submitted of analysis.domains) {
+    // Co-mentioned official organizations are separate reference entities, not contradictions.
+    if (
+      belongsToAnotherRecognizedOrganization(submitted, organization.domain, analysis.organizations)
+    )
+      continue;
+    const matched = registeredDomain(submitted) === organization.domain;
     evidence.push(
       await record(
         input.caseId,
         'verify_organization',
         matched ? 'verified_fact' : 'suspicious_signal',
         matched ? 'Submitted registered domain matches catalog' : 'Organization domain mismatch',
-        `${organization.name}: submitted ${submitted}; independent official domain ${organization.domain}. ${matched ? 'A domain match alone does not prove the message or sender is legitimate.' : 'The submitted registered domain differs from the independently known official domain.'}`,
+        `${organization.name}: submitted ${submitted}; independent official domain ${organization.domain}. ${matched ? 'A domain match alone does not prove the message or sender is legitimate.' : 'The submitted registered domain differs from this independent official reference; its relationship to the organization remains unverified. Legitimate third-party links are possible.'}`,
         organization.contactSource,
       ),
     );
-    await saveJson(input.caseId, `comparison-${organization.domain}.json`, {
+    comparisons.push({
       submitted,
       verified: organization.domain,
       sourceUrl: organization.contactSource,
-    } satisfies Comparison);
+    });
   }
+  const allMatched = comparisons.length
+    ? comparisons.every((item) => registeredDomain(item.submitted) === organization.domain)
+    : null;
+  const selected = input.submittedDomain
+    ? comparisons.find((item) => item.submitted === normalizeDomain(input.submittedDomain ?? ''))
+    : undefined;
+  const matched = input.submittedDomain
+    ? selected
+      ? registeredDomain(selected.submitted) === organization.domain
+      : null
+    : allMatched;
+  await saveJson(input.caseId, `comparisons-${organization.domain}.json`, comparisons);
   return {
     kind: 'organization_verification',
     caseId: input.caseId,
@@ -556,11 +590,12 @@ export async function verifyOrganization(input: {
     officialContactSource: organization.contactSource,
     sourceAvailable: available,
     matched,
+    allMatched,
     evidence,
   };
 }
 export async function inspectSender(input: { caseId: string }) {
-  const original = await readJson<{ sender?: string }>(input.caseId, 'submission.json');
+  const original = await readJson<SuppliedIdentities>(input.caseId, 'submission.json');
   if (!original)
     throw new InvestigationError(
       'CASE_NOT_FOUND',
@@ -569,7 +604,36 @@ export async function inspectSender(input: { caseId: string }) {
   const analysis = await readJson<SubmissionAnalysis>(input.caseId, 'analysis.json');
   if (!analysis)
     throw new InvestigationError('ANALYSIS_REQUIRED', 'Analyze the original submission first.');
-  const sender = parseSender(original.sender ?? '');
+  const values = suppliedSenders(original);
+  const identities = (values.length ? values : ['']).map(parseSender);
+  const results: Awaited<ReturnType<typeof inspectIdentity>>[] = [];
+  // At most two independent identity checks in flight, including legacy cases with a third field.
+  for (let index = 0; index < identities.length; index += 2) {
+    results.push(
+      ...(await Promise.all(
+        identities
+          .slice(index, index + 2)
+          .map((sender) => inspectIdentity(input.caseId, sender, analysis)),
+      )),
+    );
+  }
+  await saveJson(input.caseId, 'sender-inspection.json', { completed: true });
+  return {
+    kind: 'sender_inspection',
+    sender: results[0]?.sender ?? parseSender(''),
+    senders: results.map((result) => result.sender),
+    phoneReputations: results.flatMap((result, senderIndex) =>
+      result.reputation ? [{ senderIndex, provider: 'IPQualityScore', ...result.reputation }] : [],
+    ),
+    evidence: results.flatMap((result) => result.evidence),
+  };
+}
+async function inspectIdentity(
+  caseId: string,
+  sender: SenderIdentity,
+  analysis: SubmissionAnalysis,
+) {
+  const input = { caseId };
   const evidence: Evidence[] = [];
   if (sender.kind === 'unknown') {
     evidence.push(
@@ -593,16 +657,51 @@ export async function inspectSender(input: { caseId: string }) {
         `Normalized international format: ${sender.e164}. Numbering-plan country: ${sender.country ?? 'unknown / shared international service'}. Numbering-plan type: ${sender.numberType?.toLowerCase().replaceAll('_', ' ') ?? 'unknown'}. Metadata describes number format, not the caller, current carrier or reputation. Caller ID can be spoofed.`,
       ),
     );
-    evidence.push(
-      await record(
-        input.caseId,
-        'inspect_sender',
-        'unknown',
-        'Phone ownership and reputation unverified',
-        'No live carrier, ownership or reputation provider is configured. A valid number format is not evidence that the sender is legitimate. Verify contacts independently.',
-      ),
-    );
-    return { kind: 'sender_inspection', sender, evidence };
+    const reputation = await lookupPhoneReputation(sender.e164);
+    if (reputation.status === 'available') {
+      evidence.push(
+        await record(
+          input.caseId,
+          'inspect_sender',
+          'verified_fact',
+          'IPQS third-party phone reputation',
+          `IPQualityScore reported: ${formatPhoneSignals(reputation.signals)}. These are third-party observations, not independently authenticated facts about the caller. Unavailable fields are shown as unknown. Scores estimate reputation, not investigation confidence; caller ID can be spoofed.`,
+          IPQS_SOURCE,
+          'third_party',
+        ),
+      );
+      const signals = reputation.signals;
+      if (
+        signals.risky === true ||
+        signals.recent_abuse === true ||
+        signals.spammer === true ||
+        (signals.fraud_score !== undefined && signals.fraud_score >= 75)
+      )
+        evidence.push(
+          await record(
+            input.caseId,
+            'inspect_sender',
+            'suspicious_signal',
+            'Third-party phone reputation concern',
+            'IPQS reported elevated reputation risk or abuse indicators. This cannot establish fraud or ownership, and must be considered alongside message, URL and independently verified organization evidence. VOIP/prepaid status alone is not suspicious.',
+            IPQS_SOURCE,
+            'third_party',
+          ),
+        );
+    } else {
+      evidence.push(
+        await record(
+          input.caseId,
+          'inspect_sender',
+          'unknown',
+          'Phone ownership and reputation unverified',
+          `${reputation.reason} Local numbering-plan checks remain available. A valid number format does not establish legitimacy; ownership remains unverified.`,
+          IPQS_SOURCE,
+          'third_party',
+        ),
+      );
+    }
+    return { kind: 'sender_inspection', sender, reputation, evidence };
   }
   const domain = await inspectDomain({ caseId: input.caseId, domain: sender.domain });
   evidence.push(...domain.evidence);
@@ -644,7 +743,15 @@ export async function inspectSender(input: { caseId: string }) {
   }
   for (const name of analysis.organizations) {
     const organization = ORGANIZATIONS.find((item) => item.name === name);
-    if (!organization) continue;
+    if (
+      !organization ||
+      belongsToAnotherRecognizedOrganization(
+        sender.domain,
+        organization.domain,
+        analysis.organizations,
+      )
+    )
+      continue;
     const matches = registeredDomain(sender.domain) === organization.domain;
     evidence.push(
       await record(
@@ -684,7 +791,10 @@ export async function createCaseReport(input: { caseId: string; summary?: string
       'INDEPENDENT_CHECK_REQUIRED',
       'Search independent trusted sources before creating a report; failed checks must remain unknown.',
     );
-  if (analysis.senderProvided && !evidence.some((item) => item.tool === 'inspect_sender'))
+  if (
+    analysis.senderProvided &&
+    !(await readJson<{ completed: boolean }>(input.caseId, 'sender-inspection.json'))?.completed
+  )
     throw new InvestigationError(
       'SENDER_CHECK_REQUIRED',
       'Inspect the original sender before creating the report.',
@@ -710,6 +820,18 @@ export async function createCaseReport(input: { caseId: string; summary?: string
       ]),
     )
   ).filter((item): item is Comparison => Boolean(item));
+  for (const org of ORGANIZATIONS) {
+    const all = await readJson<Comparison[]>(input.caseId, `comparisons-${org.domain}.json`);
+    for (const comparison of all ?? []) {
+      if (
+        !comparisons.some(
+          (item) =>
+            item.submitted === comparison.submitted && item.verified === comparison.verified,
+        )
+      )
+        comparisons.push(comparison);
+    }
+  }
   const signals = evidence.filter((item) => item.kind === 'suspicious_signal');
   const mismatch = evidence.some((item) => item.title === 'Organization domain mismatch');
   const injectionDetected =
@@ -718,9 +840,12 @@ export async function createCaseReport(input: { caseId: string; summary?: string
   const hasExternalFact = evidence.some(
     (item) =>
       item.kind === 'verified_fact' &&
-      ['search_trusted_sources', 'verify_organization', 'inspect_url', 'inspect_domain'].includes(
+      (['search_trusted_sources', 'verify_organization', 'inspect_url', 'inspect_domain'].includes(
         item.tool,
-      ),
+      ) ||
+        (item.tool === 'inspect_sender' &&
+          item.title === 'IPQS third-party phone reputation' &&
+          item.sourceUrl === IPQS_SOURCE)),
   );
   const risk: Report['risk'] =
     analysis.urgency && analysis.sensitiveRequest && mismatch

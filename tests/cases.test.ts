@@ -180,6 +180,26 @@ afterEach(async () => {
 });
 
 describe('case recovery and approval integrity', () => {
+  it('persists all supplied signals together without replacing the original', async () => {
+    const input = {
+      text: 'Chase asks me to move money now. https://bank-check.example/verify',
+      url: 'https://other-check.example/',
+      senderPhone: '+18007132618',
+      senderEmail: 'alert@bank-check.example',
+      claimedOrganization: 'Chase',
+    };
+    const result = await cases.createCase(input);
+    expect(
+      JSON.parse(await readFile(cases.casePath(result.id, 'submission.json'), 'utf8')),
+    ).toEqual({ ...input, sender: '' });
+  });
+
+  it('bounds identity input before creating a harness session', async () => {
+    await expect(cases.createCase({ senderPhone: '1'.repeat(81) })).rejects.toThrow();
+    await expect(cases.createCase({ claimedOrganization: 'a'.repeat(121) })).rejects.toThrow();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it('persists optional sender as untrusted original input and accepts sender-only cases', async () => {
     const result = await cases.createCase({ sender: 'sender@example.org' });
     expect(
@@ -470,6 +490,44 @@ describe('case connector and execution evidence', () => {
     expect(view.activity.find((item) => item.type === 'sandbox.created')?.detail).toBe(
       'Native TrueForge sandbox ready for isolated execution.',
     );
+  });
+
+  it('shows native subagent threads and their measured duration without exposing task input', async () => {
+    await preparedCase();
+    const parent = { threadId: 'root', toolCallId: 'spawn' };
+    events = [
+      {
+        id: 'child-start',
+        type: 'thread.created',
+        createdAt: timestamp,
+        threadId: 'identity',
+        title: 'Identity Investigator',
+        parent,
+        agentInfo: { type: 'dynamic', name: 'Identity Investigator', input: 'private task input' },
+      },
+      {
+        id: 'child-done',
+        type: 'thread.done',
+        createdAt: '2026-09-19T12:00:00.420Z',
+        threadId: 'identity',
+        title: 'Identity Investigator',
+        parent,
+        state: { status: 'done', output: model([]) },
+      },
+    ];
+    const view = await cases.readCase(id);
+    expect(view.activity).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'thread.created', label: 'Identity Investigator' }),
+        expect.objectContaining({
+          type: 'thread.done',
+          threadId: 'identity',
+          durationMs: 420,
+          success: true,
+        }),
+      ]),
+    );
+    expect(JSON.stringify(view.activity)).not.toContain('private task input');
   });
 
   it('attributes wrapped MCP results to their recorded call, including failures', async () => {

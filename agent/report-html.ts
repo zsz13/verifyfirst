@@ -1,3 +1,4 @@
+import { evidenceLabel } from './evidence.ts';
 import type { CaseReport } from './types.ts';
 
 function escape(value: string): string {
@@ -39,12 +40,6 @@ function date(value: string): string {
     : 'Time not recorded';
 }
 
-const labels = {
-  verified_fact: 'Verified fact',
-  suspicious_signal: 'Suspicious signal',
-  unknown: 'Unknown',
-};
-
 /** Only render the already approved, redacted export artifact, never raw case input. */
 export function renderReportHtml(report: CaseReport): string {
   const risk = report.risk.replaceAll('_', ' ');
@@ -52,7 +47,7 @@ export function renderReportHtml(report: CaseReport): string {
   const evidence = report.evidence
     .map(
       (item, index) => `<article class="evidence">
-        <div class="eyebrow"><span class="badge ${item.kind}">${labels[item.kind]}</span><span>Evidence ${index + 1}</span></div>
+        <div class="eyebrow"><span class="badge ${item.kind}">${evidenceLabel(item)}</span><span>Evidence ${index + 1}</span></div>
         <h3>${escape(item.title)}</h3><p>${escape(item.detail)}</p>
         <p class="source">${source(item.sourceUrl)}</p>
         <p class="muted metadata">${escape(item.tool)} · ${date(item.observedAt)}</p>
@@ -71,7 +66,7 @@ export function renderReportHtml(report: CaseReport): string {
     .sort((left, right) => left.observedAt.localeCompare(right.observedAt))
     .map(
       (item) =>
-        `<li><time>${date(item.observedAt)}</time><div><strong>${escape(item.title)}</strong><span class="muted">${escape(item.tool)} · ${labels[item.kind]}</span></div></li>`,
+        `<li><time>${date(item.observedAt)}</time><div><strong>${escape(item.title)}</strong><span class="muted">${escape(item.tool)} · ${evidenceLabel(item)}</span></div></li>`,
     )
     .join('');
 

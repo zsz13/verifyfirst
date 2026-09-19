@@ -10,7 +10,7 @@ export type Comparison = CaseReport['comparisons'][number];
 export function caseDir(caseId: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(caseId))
     throw new InvestigationError('INVALID_CASE', 'caseId must be a UUID.');
-  return join(resolve(process.env.VERIFYFIRST_DATA_DIR ?? '.data'), 'cases', caseId);
+  return join(resolve(process.env.VERIFYFIRST_DATA_DIR || '.data'), 'cases', caseId);
 }
 export async function saveJson(caseId: string, filename: string, value: unknown): Promise<void> {
   const directory = caseDir(caseId);
@@ -34,6 +34,7 @@ export async function record(
   title: string,
   detail: string,
   sourceUrl?: string,
+  provenance?: Evidence['provenance'],
 ): Promise<Evidence> {
   const evidence: Evidence = {
     id: randomUUID(),
@@ -43,6 +44,7 @@ export async function record(
     detail,
     observedAt: new Date().toISOString(),
     ...(sourceUrl ? { sourceUrl } : {}),
+    ...(provenance ? { provenance } : {}),
   };
   await saveJson(caseId, `evidence-${evidence.id}.json`, evidence);
   return evidence;

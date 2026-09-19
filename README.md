@@ -1,6 +1,6 @@
 # VerifyFirst
 
-**Evidence before action.** Paste a suspicious message or URL. VerifyFirst investigates domains, retrieves independent official sources, preserves uncertainty, and creates a case report. Export pauses at a native TrueForge human-approval gate.
+**Evidence before action.** Paste a suspicious message, URL, or sender identity. VerifyFirst investigates domains, retrieves independent official sources, preserves uncertainty, and creates a case report. Export pauses at a native TrueForge human-approval gate.
 
 The model runs on **TrueForge 0.2.0**. There is no separate agent loop and no direct model-provider call in VerifyFirst.
 
@@ -51,12 +51,22 @@ npm start
 
 Stop the web development server before switching to production mode. The production web server still needs TrueForge and MCP. `npm run dev:web` starts only the development frontend. This is not an internet-facing or multi-user deployment.
 
+## Investigation experience
+
+- Pasted HTTP(S) links are detected without opening them. A single link fills the editable link field; multiple links are listed and included in the investigation. Removing the extra link field does not remove a URL still present in the original message. Cases accept up to five distinct links; larger submissions must be split rather than silently truncated.
+- Optional **Sender** accepts an email address or phone number. Use an explicit `+country code` for phone normalization; no country is guessed for national numbers. Numbering-plan country/type can differ from the caller’s current location or carrier. Caller ID can be spoofed. Email record presence does not prove successful message authentication.
+- **Allow export** resumes the native TrueForge approval. Once the export exists, JSON downloads automatically, with **Download again** as a fallback. The print-friendly report uses the same approved, redacted artifact; open it and choose browser **Print / Save as PDF**. No unapproved report can be downloaded in either format.
+- Activity shows seconds and measured call-to-result elapsed time. Elapsed time includes harness scheduling and approval waits; it is not CPU or exclusive tool execution time.
+- **How it works** explains evidence and limitations. **Stay safe** links to independent FTC and FBI/IC3 advice. The original evidence/check mark is provided locally as SVG and used in the UI, favicon, and report.
+
+No paid enrichment service is needed. Phone reputation, live carrier/ownership lookup, full email-header authentication, and URL threat-intelligence providers are deliberately deferred; core checks remain functional without them.
+
 ## Three-minute demo
 
 1. **0:00–0:25:** Select the urgent bank alert. Show the request to move money and the supplied contact details. Samples are synthetic; reserved `.example` hosts deliberately do not resolve.
 2. **0:25–1:25:** Investigate. Show TrueForge's tool activity: extraction, DNS/RDAP, URL inspection, organization verification, trusted references, report creation, and native sandbox execution when available.
 3. **1:25–2:10:** Inspect the domain comparison, sourced evidence, unknown observations, and separate conclusion. Failed DNS alone does not prove fraud.
-4. **2:10–2:40:** **Film the pause.** Refresh while the native approval card is visible. Approve export, wait for the continuation, then download the redacted JSON. Export contacts no bank, regulator, or third party.
+4. **2:10–2:40:** **Film the pause.** Refresh while the native approval card is visible. Approve export and let the redacted JSON download automatically after the continuation succeeds. Open the print-friendly evidence report and use your browser’s Print / Save as PDF. Export contacts no bank, regulator, or third party.
 5. **2:40–3:00:** Show separate completed runs for the injection sample and ordinary reminder. The former must flag embedded instructions; the latter must retain UNKNOWN/LOW EVIDENCE rather than automatic HIGH RISK.
 
 See [demo notes](docs/DEMO.md).
@@ -65,7 +75,7 @@ See [demo notes](docs/DEMO.md).
 
 ```text
 apps/web/   Next.js + TypeScript workbench and local API
-apps/mcp/   Seven MCP tools, protected HTTP retrieval, evidence store
+apps/mcp/   Eight MCP tools, protected HTTP retrieval, evidence store
 agent/      TrueForge SDK integration, policy, durable session mapping
 fixtures/   Three synthetic demo messages
 evals/      Twelve offline cases and three model-backed scenarios
@@ -74,19 +84,20 @@ scripts/    Startup, setup, and live MCP smoke check
 docs/       Architecture, demo, and verification notes
 ```
 
-TrueForge owns model calls, tool routing, approval state, sandbox provisioning, and session history. The frontend starts a background turn and reads durable events; closing or refreshing the page does not cancel execution. LocalStorage contains only a case UUID. The application stores original input, evidence, and case/session mapping privately on disk.
+TrueForge owns model calls, tool routing, approval state, sandbox provisioning, and session history. The frontend starts a background turn and reads durable events; closing or refreshing the page does not cancel execution. LocalStorage contains only a case UUID. The application stores original input, evidence, and case/session mapping privately on disk. A tab-scoped case ID records a requested automatic download; it never grants export permission.
 
 Each case gets a connector with a fixed case header. Tool arguments cannot switch cases. The stored original cannot be replaced by the model. Reports and risk labels are computed from tool-owned observations, not accepted from generated model JSON.
 
 Tools:
 
 - `analyze_submission`: extracts URLs, domains, organizations, contacts, requested actions, urgency, and known injection patterns.
+- `inspect_sender`: original sender only; international phone normalization/numbering metadata or email DNS/MX/SPF/DMARC, registration and independent organization comparison. Identity and reputation remain unverified.
 - `inspect_domain`: normalization, punycode/brand indicators, real DNS and RDAP registration information when available.
 - `inspect_url`: bounded public HTTP(S) inspection, pinned DNS, revalidated redirects, no JavaScript or cookies.
 - `search_trusted_sources`: searches a **bounded curated catalog** and retrieves matching FTC, CFPB, and Postal Inspection Service pages live; not unrestricted web search.
 - `verify_organization`: independently maintained Chase, Bank of America, Wells Fargo, PayPal, and USPS references; live official contact/security pages.
 - `create_case_report`: recorded evidence, comparisons, classification, limitations, and safer next actions.
-- `export_case_report`: native approval plus a single-use application grant bound to the report hash; redacted local JSON export.
+- `export_case_report`: native approval plus a single-use application grant bound to the report hash; redacted local JSON export; the approved artifact also renders as a print-friendly HTML report.
 
 ## Verify
 
@@ -103,7 +114,7 @@ npm run eval:live
 
 Offline evals exercise real parsing/report/export code with honestly unavailable external evidence. They do not fabricate web results or prove model execution. Live evals require three distinct successful MCP tools, native approval pauses, sourced evidence, injection handling, uncertainty, completed denial continuations, and actual execution when a sandbox is available. They **do not automatically approve exports**; exercise successful approval through the frontend.
 
-Live session IDs/results stay in ignored `.data/`. [Verification notes](docs/VERIFICATION.md) record 79 passing tests, 12 offline evaluations, all three successful live demos with native sandbox execution, and a UI-approved export after refresh and harness restart.
+Live session IDs/results stay in ignored `.data/`. [Verification notes](docs/VERIFICATION.md) separate deterministic checks, live scenarios, and browser verification.
 
 ## Boundaries
 

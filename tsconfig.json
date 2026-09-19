@@ -1,10 +1,27 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "lib": ["ES2022", "DOM"], "module": "ESNext",
-    "moduleResolution": "Bundler", "strict": true, "noUncheckedIndexedAccess": true,
-    "noUnusedLocals": true, "noUnusedParameters": true, "noFallthroughCasesInSwitch": true,
-    "esModuleInterop": true, "skipLibCheck": true, "resolveJsonModule": true,
-    "allowImportingTsExtensions": true, "noEmit": true, "types": ["node"]
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
   },
-  "include": ["apps/mcp/**/*.ts", "agent/**/*.ts", "scripts/**/*.ts", "evals/**/*.ts", "tests/**/*.ts", "fixtures/**/*.ts"]
+  "include": [
+    "apps/mcp/**/*.ts",
+    "agent/**/*.ts",
+    "scripts/**/*.ts",
+    "evals/**/*.ts",
+    "tests/**/*.ts",
+    "fixtures/**/*.ts"
+  ]
 }

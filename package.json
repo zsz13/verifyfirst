@@ -3,8 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.14.0" },
-  "workspaces": ["apps/web"],
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "workspaces": [
+    "apps/web"
+  ],
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "dev:web": "npm run dev --workspace apps/web",
@@ -42,7 +46,7 @@
     "eslint-plugin-react-hooks": "^7.0.0",
     "prettier": "^3.6.0",
     "tsx": "^4.20.0",
-    "typescript": "7.0.2",
+    "typescript": "6.0.3",
     "typescript-eslint": "^8.46.0",
     "vitest": "^3.2.4"
   }

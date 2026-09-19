@@ -1,5 +1,7 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { Resolver } from 'node:dns/promises';
 import { z } from 'zod';
+import { parseSender } from './sender.ts';
 import {
   analyzeText,
   domainSignals,
@@ -81,8 +83,9 @@ export const toolSchemas = {
       ),
     url: z.string().max(4096).optional(),
   },
+  inspect_sender: { caseId },
   inspect_domain: { caseId, domain: z.string().max(4096) },
-  inspect_url: { caseId, url: z.string().max(4096) },
+  inspect_url: { caseId, url: z.string().max(12000) },
   search_trusted_sources: {
     caseId,
     query: z
@@ -113,6 +116,8 @@ export const toolSchemas = {
 export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
   analyze_submission:
     'Parse untrusted submitted content, extract domains/organizations/actions, and flag embedded instruction attacks. This does not execute or obey content.',
+  inspect_sender:
+    'Inspect only the application-stored optional sender. Normalize international phone numbering metadata or inspect email DNS/MX/SPF/DMARC, domain registration and independent organization mismatch. These signals cannot authenticate identity. No reputation provider is configured.',
   inspect_domain:
     'Normalize a hostname, detect brand/punycode signals, query public DNS and RDAP. Failed lookups remain unknown. Domain registration is not a safety verdict.',
   inspect_url:
@@ -127,7 +132,10 @@ export const toolDescriptions: Record<keyof typeof toolSchemas, string> = {
     'SENSITIVE ACTION: export a redacted local case report. Requires native TrueForge human approval and a valid single-use application grant bound to the report hash. Has no network side effect.',
 };
 export async function analyzeSubmission(input: { caseId: string; text: string; url?: string }) {
-  const original = await readJson<{ text: string; url?: string }>(input.caseId, 'submission.json');
+  const original = await readJson<{ text: string; url?: string; sender?: string }>(
+    input.caseId,
+    'submission.json',
+  );
   if (
     !original ||
     typeof original.text !== 'string' ||
@@ -147,7 +155,7 @@ export async function analyzeSubmission(input: { caseId: string; text: string; u
         (item) => item.tool === 'analyze_submission',
       ),
     };
-  const analysis = analyzeText(original.text, original.url);
+  const analysis = analyzeText(original.text, original.url, original.sender);
   await saveJson(input.caseId, 'analysis.json', analysis);
   const evidence: Evidence[] = [];
   evidence.push(
@@ -296,6 +304,9 @@ export async function inspectDomain(input: { caseId: string; domain: string }) {
     evidence,
   };
 }
+function urlInspectionFile(url: string): string {
+  return `url-inspection-${createHash('sha256').update(url).digest('hex')}.json`;
+}
 export async function inspectUrl(input: { caseId: string; url: string }) {
   const evidence: Evidence[] = [];
   try {
@@ -338,6 +349,7 @@ export async function inspectUrl(input: { caseId: string; url: string }) {
           result.finalUrl,
         ),
       );
+    await saveJson(input.caseId, urlInspectionFile(input.url), { attempted: true });
     return {
       kind: 'url_inspection',
       caseId: input.caseId,
@@ -359,6 +371,7 @@ export async function inspectUrl(input: { caseId: string; url: string }) {
         error,
       ),
     );
+    await saveJson(input.caseId, urlInspectionFile(input.url), { attempted: true });
     return {
       kind: 'url_inspection',
       caseId: input.caseId,
@@ -546,8 +559,120 @@ export async function verifyOrganization(input: {
     evidence,
   };
 }
+export async function inspectSender(input: { caseId: string }) {
+  const original = await readJson<{ sender?: string }>(input.caseId, 'submission.json');
+  if (!original)
+    throw new InvestigationError(
+      'CASE_NOT_FOUND',
+      'Application-created original submission is required.',
+    );
+  const analysis = await readJson<SubmissionAnalysis>(input.caseId, 'analysis.json');
+  if (!analysis)
+    throw new InvestigationError('ANALYSIS_REQUIRED', 'Analyze the original submission first.');
+  const sender = parseSender(original.sender ?? '');
+  const evidence: Evidence[] = [];
+  if (sender.kind === 'unknown') {
+    evidence.push(
+      await record(
+        input.caseId,
+        'inspect_sender',
+        'unknown',
+        'Sender identity remains unknown',
+        sender.reason,
+      ),
+    );
+    return { kind: 'sender_inspection', sender, evidence };
+  }
+  if (sender.kind === 'phone') {
+    evidence.push(
+      await record(
+        input.caseId,
+        'inspect_sender',
+        'verified_fact',
+        'Phone numbering-plan observation',
+        `Normalized international format: ${sender.e164}. Numbering-plan country: ${sender.country ?? 'unknown / shared international service'}. Numbering-plan type: ${sender.numberType?.toLowerCase().replaceAll('_', ' ') ?? 'unknown'}. Metadata describes number format, not the caller, current carrier or reputation. Caller ID can be spoofed.`,
+      ),
+    );
+    evidence.push(
+      await record(
+        input.caseId,
+        'inspect_sender',
+        'unknown',
+        'Phone ownership and reputation unverified',
+        'No live carrier, ownership or reputation provider is configured. A valid number format is not evidence that the sender is legitimate. Verify contacts independently.',
+      ),
+    );
+    return { kind: 'sender_inspection', sender, evidence };
+  }
+  const domain = await inspectDomain({ caseId: input.caseId, domain: sender.domain });
+  evidence.push(...domain.evidence);
+  evidence.push(
+    await record(
+      input.caseId,
+      'inspect_sender',
+      'verified_fact',
+      'Sender email domain parsed',
+      `The claimed sender uses ${sender.domain}. The mailbox local part is omitted from this evidence. A syntactically valid address does not establish mailbox existence or message authenticity.`,
+    ),
+  );
+  const resolver = new Resolver({ timeout: 4000, tries: 1 });
+  const checks = await Promise.allSettled([
+    resolver.resolveTxt(sender.domain),
+    resolver.resolveTxt(`_dmarc.${sender.domain}`),
+  ]);
+  for (const [index, label] of ['SPF', 'DMARC'].entries()) {
+    const result = checks[index];
+    const records =
+      result?.status === 'fulfilled' ? result.value.map((parts) => parts.join('')) : [];
+    const prefix = label === 'SPF' ? /^v=spf1(?:\s|$)/i : /^v=DMARC1(?:\s*;|$)/i;
+    const count = records.filter((value) => prefix.test(value)).length;
+    const noData =
+      result?.status === 'rejected' &&
+      ['ENODATA', 'ENOTFOUND'].includes(String((result.reason as NodeJS.ErrnoException)?.code));
+    const queried = result?.status === 'fulfilled' || noData;
+    evidence.push(
+      await record(
+        input.caseId,
+        'inspect_sender',
+        queried ? 'verified_fact' : 'unknown',
+        `${label} DNS presence observation`,
+        queried
+          ? `${label} lookup for ${label === 'SPF' ? sender.domain : `_dmarc.${sender.domain}`}: ${count} matching record(s) observed. ${count ? 'Record presence does not prove a valid configuration or that this message passed authentication.' : 'No matching record was observed at this exact hostname; this is not proof of fraud.'} ${label === 'DMARC' ? 'Organizational-domain policy fallback is not evaluated. ' : ''}No email headers or delivery authentication results were supplied.`
+          : `${label} DNS lookup was unavailable. Authentication policy remains unknown; lookup failure is not proof of fraud.`,
+      ),
+    );
+  }
+  for (const name of analysis.organizations) {
+    const organization = ORGANIZATIONS.find((item) => item.name === name);
+    if (!organization) continue;
+    const matches = registeredDomain(sender.domain) === organization.domain;
+    evidence.push(
+      await record(
+        input.caseId,
+        'inspect_sender',
+        matches ? 'verified_fact' : 'suspicious_signal',
+        matches ? 'Sender domain matches independent catalog' : 'Organization domain mismatch',
+        `Claimed ${organization.name} sender domain: ${sender.domain}; independent official domain: ${organization.domain}. ${matches ? 'A domain match does not authenticate this sender or message.' : 'The domains differ. Third-party senders can be legitimate; independently verify the claimed relationship.'}`,
+        organization.contactSource,
+      ),
+    );
+    await saveJson(input.caseId, `sender-comparison-${organization.domain}.json`, {
+      submitted: sender.domain,
+      verified: organization.domain,
+      sourceUrl: organization.contactSource,
+    } satisfies Comparison);
+  }
+  return { kind: 'sender_inspection', sender, domain, evidence };
+}
 export async function createCaseReport(input: { caseId: string; summary?: string }) {
-  const evidence = await readEvidence(input.caseId);
+  // Coverage is a current report view, not an immutable observation. Discard legacy derived entries.
+  const evidence = (await readEvidence(input.caseId)).filter(
+    (item) =>
+      !(
+        item.tool === 'create_case_report' &&
+        /^Submitted link \d+ inspection not recorded$/.test(item.title)
+      ),
+  );
   const analysis = await readJson<SubmissionAnalysis>(input.caseId, 'analysis.json');
   if (!analysis)
     throw new InvestigationError(
@@ -559,11 +684,30 @@ export async function createCaseReport(input: { caseId: string; summary?: string
       'INDEPENDENT_CHECK_REQUIRED',
       'Search independent trusted sources before creating a report; failed checks must remain unknown.',
     );
+  if (analysis.senderProvided && !evidence.some((item) => item.tool === 'inspect_sender'))
+    throw new InvestigationError(
+      'SENDER_CHECK_REQUIRED',
+      'Inspect the original sender before creating the report.',
+    );
+  for (const [index, url] of analysis.urls.entries()) {
+    const marker = await readJson<{ attempted?: boolean }>(input.caseId, urlInspectionFile(url));
+    if (!marker?.attempted)
+      evidence.push({
+        id: randomUUID(),
+        tool: 'create_case_report',
+        kind: 'unknown',
+        title: `Submitted link ${index + 1} inspection not recorded`,
+        detail:
+          'No completed URL inspection was recorded for this submitted link. Its behavior remains unknown; other link checks cannot establish its safety.',
+        observedAt: new Date().toISOString(),
+      });
+  }
   const comparisons = (
     await Promise.all(
-      ORGANIZATIONS.map((org) =>
+      ORGANIZATIONS.flatMap((org) => [
         readJson<Comparison>(input.caseId, `comparison-${org.domain}.json`),
-      ),
+        readJson<Comparison>(input.caseId, `sender-comparison-${org.domain}.json`),
+      ]),
     )
   ).filter((item): item is Comparison => Boolean(item));
   const signals = evidence.filter((item) => item.kind === 'suspicious_signal');
@@ -635,27 +779,28 @@ export async function executeTool(name: keyof typeof toolSchemas, raw: unknown):
       name === 'inspect_domain'
         ? z.object(toolSchemas.inspect_domain).parse(input).domain
         : z.object(toolSchemas.inspect_url).parse(input).url;
-    const hostname = normalizeDomain(target);
-    const official = ORGANIZATIONS.some(
-      (org) =>
-        hostname === org.domain ||
-        hostname.endsWith(`.${org.domain}`) ||
-        hostname === new URL(org.contactSource).hostname,
-    );
-    if (
-      !official &&
-      (name === 'inspect_domain'
-        ? !analysis.domains.includes(hostname)
-        : !analysis.urls.includes(target))
-    )
-      throw new InvestigationError(
-        'UNRELATED_TARGET',
-        'Inspect only original submitted targets or independently cataloged official sources.',
+    // Exact original URLs must reach safeFetch even if malformed, so blocked attempts are recorded.
+    const originalUrl = name === 'inspect_url' && analysis.urls.includes(target);
+    if (!originalUrl) {
+      const hostname = normalizeDomain(target);
+      const official = ORGANIZATIONS.some(
+        (org) =>
+          hostname === org.domain ||
+          hostname.endsWith(`.${org.domain}`) ||
+          hostname === new URL(org.contactSource).hostname,
       );
+      if (!official && (name === 'inspect_url' || !analysis.domains.includes(hostname)))
+        throw new InvestigationError(
+          'UNRELATED_TARGET',
+          'Inspect only original submitted targets or independently cataloged official sources.',
+        );
+    }
   }
   switch (name) {
     case 'analyze_submission':
       return analyzeSubmission(z.object(toolSchemas.analyze_submission).parse(input));
+    case 'inspect_sender':
+      return inspectSender({ caseId: input.caseId });
     case 'inspect_domain':
       return inspectDomain(z.object(toolSchemas.inspect_domain).parse(input));
     case 'inspect_url':
@@ -664,8 +809,25 @@ export async function executeTool(name: keyof typeof toolSchemas, raw: unknown):
       return searchTrustedSources(z.object(toolSchemas.search_trusted_sources).parse(input));
     case 'verify_organization':
       return verifyOrganization(z.object(toolSchemas.verify_organization).parse(input));
-    case 'create_case_report':
+    case 'create_case_report': {
+      // The harness must attempt every submitted link. The report builder also supports honest
+      // partial reports for offline evaluation and preserved older cases without execution markers.
+      const analysis = await readJson<SubmissionAnalysis>(input.caseId, 'analysis.json');
+      if (analysis) {
+        for (const url of analysis.urls) {
+          const marker = await readJson<{ attempted?: boolean }>(
+            input.caseId,
+            urlInspectionFile(url),
+          );
+          if (!marker?.attempted)
+            throw new InvestigationError(
+              'URL_CHECK_REQUIRED',
+              'Inspect every original submitted URL before creating the report. Blocked or unavailable inspections count as attempts and remain unknown.',
+            );
+        }
+      }
       return createCaseReport(z.object(toolSchemas.create_case_report).parse(input));
+    }
     case 'export_case_report':
       return exportCaseReport(input.caseId);
   }

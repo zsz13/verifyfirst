@@ -116,6 +116,7 @@ export async function exportCaseReport(
         }
       })
       .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email redacted]')
+      .replace(/\+[1-9]\d{3,14}\b/g, '[number redacted]')
       .replace(/(?:\+?\d[\d ().-]{7,}\d)/g, '[number redacted]');
   const redacted: Report = {
     ...report,

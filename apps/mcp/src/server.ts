@@ -59,6 +59,7 @@ function startServer(): void {
             destructiveHint: false,
             openWorldHint: [
               'inspect_domain',
+              'inspect_sender',
               'inspect_url',
               'search_trusted_sources',
               'verify_organization',

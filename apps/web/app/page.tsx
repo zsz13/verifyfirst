@@ -14,11 +14,13 @@ import {
   LoaderCircle,
   LockKeyhole,
   Search,
-  ShieldCheck,
   ShieldAlert,
   X,
 } from 'lucide-react';
 import type { CaseReport, CaseView, HealthView } from '../../../agent/types';
+import { BrandMark, SiteFooter, SiteHeader } from './components/site-chrome';
+import { formatElapsed } from './components/input-helpers';
+import { extractMessageUrls, MAX_INVESTIGATION_URLS } from '../../../agent/input';
 import { demos } from '../../../fixtures/demos';
 
 const STORAGE_KEY = 'verifyfirst.caseId';
@@ -194,6 +196,12 @@ function Report({ report }: { report: CaseReport }) {
 export default function Home() {
   const [text, setText] = useState('');
   const [url, setUrl] = useState('');
+  const [sender, setSender] = useState('');
+  const [urlMode, setUrlMode] = useState<'detected' | 'manual'>('detected');
+  const [formError, setFormError] = useState('');
+  const detectedUrls = extractMessageUrls(text);
+  const pendingDownload = useRef<string | null>(null);
+  const downloadedCases = useRef(new Set<string>());
   const [health, setHealth] = useState<HealthView | null>(null);
   const [caseView, setCaseView] = useState<CaseView | null>(null);
   const [error, setError] = useState('');
@@ -208,6 +216,39 @@ export default function Home() {
   const recoveryLock = useRef(false);
   const caseGeneration = useRef(0);
   const textArea = useRef<HTMLTextAreaElement>(null);
+
+  const updateMessage = (value: string) => {
+    setText(value);
+    setFormError('');
+    if (urlMode === 'detected') {
+      const detected = extractMessageUrls(value);
+      setUrl(detected.length === 1 ? (detected[0] ?? '') : '');
+    }
+  };
+
+  useEffect(() => {
+    if (!caseView?.exported || downloadedCases.current.has(caseView.id)) return;
+    let approvedHere = pendingDownload.current === caseView.id;
+    try {
+      approvedHere ||= sessionStorage.getItem('verifyfirst.pendingDownload') === caseView.id;
+    } catch {
+      // In-memory intent still supports browsers with storage disabled.
+    }
+    if (!approvedHere) return;
+    downloadedCases.current.add(caseView.id);
+    pendingDownload.current = null;
+    try {
+      sessionStorage.removeItem('verifyfirst.pendingDownload');
+    } catch {
+      // Download can continue without browser storage.
+    }
+    const link = document.createElement('a');
+    link.href = `/api/cases/${encodeURIComponent(caseView.id)}/export`;
+    link.download = `verifyfirst-${caseView.id}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }, [caseView]);
 
   const refreshHealth = useCallback(async () => {
     setHealthChecking(true);
@@ -318,13 +359,19 @@ export default function Home() {
 
   const investigate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (
-      submissionLock.current ||
-      recoveryLock.current ||
-      restoring ||
-      (!text.trim() && !url.trim())
-    )
+    if (submissionLock.current || recoveryLock.current || restoring) return;
+    if (!text.trim() && !url.trim() && !sender.trim()) {
+      setFormError('Add a message, link or sender to investigate.');
       return;
+    }
+    const links = new Set([...detectedUrls, ...extractMessageUrls(url)]);
+    if (links.size > MAX_INVESTIGATION_URLS) {
+      setFormError(
+        `Investigate up to ${MAX_INVESTIGATION_URLS} unique links at a time. Remove extra links from the message or split it into separate cases.`,
+      );
+      return;
+    }
+    setFormError('');
     submissionLock.current = true;
     setSubmitting(true);
     setError('');
@@ -332,7 +379,13 @@ export default function Home() {
       const result = await request<CaseView>('/api/cases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text.trim(), url: url.trim() || undefined }),
+        body: JSON.stringify({
+          text: text.trim(),
+          // Detected links are already in the immutable message. Avoid duplicating
+          // long links into the shorter optional manual-URL field.
+          url: urlMode === 'manual' ? url.trim() || undefined : undefined,
+          sender: sender.trim() || undefined,
+        }),
       });
       caseGeneration.current += 1;
       setCaseView(result);
@@ -364,6 +417,21 @@ export default function Home() {
 
   const approve = async (toolCallId: string, decision: 'allow' | 'deny') => {
     if (!caseView || approvalLock.current || recoveryLock.current || restoring) return;
+    if (decision === 'allow') {
+      pendingDownload.current = caseView.id;
+      try {
+        sessionStorage.setItem('verifyfirst.pendingDownload', caseView.id);
+      } catch {
+        /* In-memory intent remains available. */
+      }
+    } else {
+      pendingDownload.current = null;
+      try {
+        sessionStorage.removeItem('verifyfirst.pendingDownload');
+      } catch {
+        // A denial clears in-memory intent even when storage is unavailable.
+      }
+    }
     approvalLock.current = true;
     setApprovalBusy(toolCallId);
     setError('');
@@ -401,26 +469,23 @@ export default function Home() {
       <a className="skip-link" href="#main">
         Skip to investigation
       </a>
-      <header className="site-header">
-        <a href="/" className="brand" aria-label="VerifyFirst home">
-          <span className="brand-icon">
-            <ShieldCheck size={22} strokeWidth={1.8} aria-hidden="true" />
-          </span>
-          VerifyFirst<span className="brand-period">.</span>
-        </a>
-        <div className="header-status">
-          <span className={`status-dot ${health?.harness ? 'online' : ''}`} />
-          <span>
-            TrueForge{' '}
-            <strong>
-              {health === null ? 'connecting' : health.harness ? 'connected' : 'offline'}
-            </strong>
-            {health?.harness && setupStatus && (
-              <small className="setup-status">{setupStatus}</small>
-            )}
-          </span>
-        </div>
-      </header>
+      <SiteHeader
+        active="investigate"
+        status={
+          <div className="header-status">
+            <span className={`status-dot ${health?.harness ? 'online' : ''}`} />
+            <span>
+              TrueForge{' '}
+              <strong>
+                {health === null ? 'connecting' : health.harness ? 'connected' : 'offline'}
+              </strong>
+              {health?.harness && setupStatus && (
+                <small className="setup-status">{setupStatus}</small>
+              )}
+            </span>
+          </div>
+        }
+      />
       <main id="main" className="main-shell">
         <div className="intro">
           <div>
@@ -488,30 +553,32 @@ export default function Home() {
               </div>
               <h2 id="input-heading">What feels off?</h2>
               <p className="card-description">
-                Add a message or link. We’ll separate what’s known from what needs caution.
+                Add a message, link or sender. We’ll separate what’s known from what needs caution.
               </p>
               <form
+                aria-describedby="form-help"
                 onSubmit={(event) => {
                   void investigate(event);
                 }}
               >
-                <label htmlFor="message">
-                  Message to investigate <span>message or link needed</span>
-                </label>
+                <label htmlFor="message">Message to investigate</label>
                 <textarea
                   id="message"
                   ref={textArea}
                   value={text}
                   onChange={(event) => {
-                    setText(event.target.value);
+                    updateMessage(event.target.value);
                   }}
-                  maxLength={20000}
+                  maxLength={12000}
                   placeholder="Paste the email, text message, or offer here…"
                   disabled={busy}
                   aria-describedby="privacy-note"
                 />
                 <label htmlFor="source-url">
-                  Link to investigate <span>message or link needed</span>
+                  Link to investigate{' '}
+                  {urlMode === 'detected' && url && (
+                    <span className="detected-badge">Detected from message</span>
+                  )}
                 </label>
                 <div className="url-input">
                   <Link2 size={16} aria-hidden="true" />
@@ -520,17 +587,82 @@ export default function Home() {
                     type="url"
                     value={url}
                     onChange={(event) => {
+                      setUrlMode('manual');
                       setUrl(event.target.value);
+                      setFormError('');
                     }}
                     placeholder="https://example.com"
                     maxLength={2048}
                     disabled={busy}
                   />
+                  {url && (
+                    <button
+                      className="clear-input"
+                      type="button"
+                      aria-label="Clear link input"
+                      disabled={busy}
+                      onClick={() => {
+                        setUrl('');
+                        setUrlMode('manual');
+                      }}
+                    >
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  )}
                 </div>
+                {detectedUrls.length > 1 && (
+                  <div className="detected-links" aria-live="polite">
+                    <strong>{detectedUrls.length} links detected from message</strong>
+                    <ul>
+                      {detectedUrls.map((link) => (
+                        <li key={link}>
+                          <Link2 size={12} aria-hidden="true" />
+                          <code>{link}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {detectedUrls.length > 0 && (
+                  <p className="field-note">
+                    All links in the message will be checked. Edit the message to remove a link from
+                    the investigation.
+                  </p>
+                )}
+                <label htmlFor="sender">
+                  Sender / identity <span>optional</span>
+                </label>
+                <input
+                  className="sender-input"
+                  id="sender"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={sender}
+                  onChange={(event) => {
+                    setSender(event.target.value);
+                    setFormError('');
+                  }}
+                  placeholder="Email address or phone with country code"
+                  maxLength={320}
+                  disabled={busy}
+                  aria-describedby="sender-help"
+                />
+                <p id="sender-help" className="field-note">
+                  Formatting and domain checks are evidence signals, not proof of identity.
+                </p>
+                <p id="form-help" className="form-help">
+                  A message, link or sender is enough to begin.
+                </p>
+                {formError && (
+                  <p className="form-error" role="alert">
+                    {formError}
+                  </p>
+                )}
                 <button
                   type="submit"
                   className="primary-button investigate-button"
-                  disabled={busy || (!text.trim() && !url.trim()) || !ready}
+                  disabled={busy || !ready}
                 >
                   {submitting || activeCase ? (
                     <LoaderCircle className="spinner" size={17} aria-hidden="true" />
@@ -543,7 +675,7 @@ export default function Home() {
                       ? 'Investigation in progress'
                       : restoring
                         ? 'Restoring your case…'
-                        : 'Investigate message'}
+                        : 'Investigate'}
                   {!busy && <ArrowRight size={17} aria-hidden="true" />}
                 </button>
                 <p id="privacy-note" className="privacy-note">
@@ -567,7 +699,11 @@ export default function Home() {
                     key={demo.id}
                     onClick={() => {
                       setText(demo.text);
-                      setUrl(demo.url);
+                      const links = extractMessageUrls(demo.text);
+                      setUrl(demo.url || (links.length === 1 ? (links[0] ?? '') : ''));
+                      setUrlMode('detected');
+                      setSender('');
+                      setFormError('');
                       setError('');
                       textArea.current?.focus();
                     }}
@@ -620,7 +756,7 @@ export default function Home() {
                 </div>
                 <div className="empty-intro">
                   <div className="empty-icon">
-                    <ShieldCheck size={35} strokeWidth={1.3} aria-hidden="true" />
+                    <BrandMark size={36} />
                     <span>
                       <Check size={12} />
                     </span>
@@ -780,15 +916,35 @@ export default function Home() {
                   </section>
                 ))}
                 {caseView.exported && (
-                  <a
-                    className="download-link"
-                    href={`/api/cases/${encodeURIComponent(caseView.id)}/export`}
-                    download
-                  >
-                    <ArrowDownToLine size={17} aria-hidden="true" />
-                    Download evidence report
-                    <ArrowRight size={16} aria-hidden="true" />
-                  </a>
+                  <section className="export-ready" aria-label="Exported report">
+                    <div>
+                      <CheckCheck size={18} aria-hidden="true" />
+                      <strong>Your evidence report is ready</strong>
+                    </div>
+                    <p>
+                      After you approve, the JSON evidence downloads automatically. If it did not
+                      start, download it again below.
+                    </p>
+                    <div className="export-actions">
+                      <a
+                        className="download-link"
+                        href={`/api/cases/${encodeURIComponent(caseView.id)}/export`}
+                        download
+                      >
+                        <ArrowDownToLine size={16} aria-hidden="true" />
+                        Download again <span>JSON</span>
+                      </a>
+                      <a
+                        className="secondary-button"
+                        href={`/reports/${encodeURIComponent(caseView.id)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Print / save PDF <ExternalLink size={13} aria-hidden="true" />
+                        <span className="sr-only"> (opens in a new tab)</span>
+                      </a>
+                    </div>
+                  </section>
                 )}
                 <section className="activity-section" aria-labelledby="activity-title">
                   <div className="section-heading">
@@ -797,9 +953,29 @@ export default function Home() {
                   </div>
                   <ol className="activity-list">
                     {caseView.activity.map((activity) => (
-                      <li key={activity.id}>
-                        <span className="activity-dot" />
+                      <li
+                        key={activity.id}
+                        className={`activity-${activity.type.includes('approval') ? 'approval' : (activity.toolKind ?? 'harness')}`}
+                      >
+                        <span className="activity-dot" aria-hidden="true" />
                         <div>
+                          <span className="activity-kind">
+                            {activity.type.includes('approval')
+                              ? 'Approval'
+                              : activity.label.toLowerCase().includes('sandbox') ||
+                                  activity.toolName?.includes('exec')
+                                ? 'Sandbox'
+                                : activity.toolKind === 'mcp'
+                                  ? 'MCP tool'
+                                  : 'TrueForge'}
+                            {activity.type.includes('response')
+                              ? activity.success === false
+                                ? ' · Failed result'
+                                : ' · Result'
+                              : activity.type === 'model.message' && Boolean(activity.toolName)
+                                ? ' · Call'
+                                : ''}
+                          </span>
                           <strong>{activity.label}</strong>
                           <p>{activity.detail}</p>
                         </div>
@@ -807,7 +983,14 @@ export default function Home() {
                           {new Date(activity.timestamp).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit',
+                            second: '2-digit',
                           })}
+                          {activity.durationMs !== undefined && (
+                            <span className="activity-duration">
+                              {' '}
+                              · {formatElapsed(activity.durationMs)} elapsed
+                            </span>
+                          )}
                         </time>
                       </li>
                     ))}
@@ -838,14 +1021,7 @@ export default function Home() {
             )}
           </section>
         </div>
-        <footer className="site-footer">
-          <span>
-            <ShieldCheck size={14} aria-hidden="true" />
-            VerifyFirst
-          </span>
-          <p>Stay curious. Check the source. Keep control.</p>
-          <span>Powered by TrueForge</span>
-        </footer>
+        <SiteFooter />
       </main>
     </>
   );

@@ -1,5 +1,7 @@
+import { extractMessageUrls } from '../../../agent/input.ts';
 import { parse } from 'tldts';
 import { domainToASCII, domainToUnicode } from 'node:url';
+import { parseSender } from './sender.ts';
 
 export const ORGANIZATIONS = [
   {
@@ -66,6 +68,7 @@ export function domainSignals(host: string): string[] {
   return signals;
 }
 export interface SubmissionAnalysis {
+  senderProvided: boolean;
   urls: string[];
   domains: string[];
   organizations: string[];
@@ -76,20 +79,20 @@ export interface SubmissionAnalysis {
   injectionDetected: boolean;
   injectionIndicators: string[];
 }
-export function analyzeText(text: string, suppliedUrl = ''): SubmissionAnalysis {
-  const urls = [
-    ...new Set([
-      ...(text.match(/https?:\/\/[^\s<>"']+/gi) ?? []).map((url) => url.replace(/[.,;!?)]+$/, '')),
-      ...(suppliedUrl ? [suppliedUrl] : []),
-    ]),
-  ].slice(0, 10);
+export function analyzeText(text: string, suppliedUrl = '', sender = ''): SubmissionAnalysis {
+  const senderIdentity = parseSender(sender);
+  const urls = [...new Set([...extractMessageUrls(text), ...(suppliedUrl ? [suppliedUrl] : [])])];
   const bareDomains =
     text.match(
       /\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|net|org|co|info|xyz|top|site|online|zip|us|uk|io)\b/gi,
     ) ?? [];
   const domains = [
     ...new Set(
-      [...urls, ...bareDomains].flatMap((value) => {
+      [
+        ...urls,
+        ...bareDomains,
+        ...(senderIdentity.kind === 'email' ? [senderIdentity.domain] : []),
+      ].flatMap((value) => {
         try {
           return [normalizeDomain(value)];
         } catch {
@@ -140,6 +143,7 @@ export function analyzeText(text: string, suppliedUrl = ''): SubmissionAnalysis 
     .filter(([pattern]) => pattern.test(text))
     .map(([, label]) => label);
   return {
+    senderProvided: Boolean(sender.trim()),
     urls,
     domains,
     organizations: ORGANIZATIONS.filter((org) =>

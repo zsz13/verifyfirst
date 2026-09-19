@@ -180,6 +180,44 @@ afterEach(async () => {
 });
 
 describe('case recovery and approval integrity', () => {
+  it('persists optional sender as untrusted original input and accepts sender-only cases', async () => {
+    const result = await cases.createCase({ sender: 'sender@example.org' });
+    expect(
+      JSON.parse(await readFile(cases.casePath(result.id, 'submission.json'), 'utf8')),
+    ).toEqual({ text: '', url: '', sender: 'sender@example.org' });
+    expect(JSON.stringify(mocks.createTurn.mock.calls[0]?.[1])).toContain('untrustedSubmission');
+  });
+  it('rejects oversized link sets before any model or session side effect', async () => {
+    await expect(
+      cases.createCase({
+        text: Array.from({ length: 6 }, (_, i) => `https://sample${i}.example`).join(' '),
+      }),
+    ).rejects.toThrow('at most 5 links');
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.createTurn).not.toHaveBeenCalled();
+    expect(
+      cases.submissionSchema.safeParse({
+        text: 'https://one.example https://one.example',
+        url: 'https://one.example',
+      }).success,
+    ).toBe(true);
+  });
+  it('derives per-call elapsed time from harness timestamps without inventing missing or negative timing', async () => {
+    await preparedCase();
+    const invocation = model([toolCall('inspect_url', 'timed')]);
+    const returned = { ...response('timed', '{}'), createdAt: '2026-09-19T12:00:00.420Z' };
+    const missing = response('missing', '{}');
+    const negative = { ...response('timed', '{}'), createdAt: '2026-09-19T11:59:59.000Z' };
+    events = [invocation, returned, missing, negative];
+    const result = await cases.readCase(id);
+    expect(result.activity.find((item) => item.id === returned.id)?.durationMs).toBe(420);
+    expect(result.activity.find((item) => item.id === missing.id)?.durationMs).toBeUndefined();
+    expect(result.activity.find((item) => item.id === negative.id)?.durationMs).toBeUndefined();
+    expect(result.activity.find((item) => item.id === 'timed')).toMatchObject({
+      toolKind: 'mcp',
+      toolName: 'inspect_url',
+    });
+  });
   it.each(['allow', 'deny'] as const)(
     'submits the exact native %s approval and never exports directly',
     async (decision) => {
@@ -461,7 +499,9 @@ describe('case connector and execution evidence', () => {
         .map((item) => item.toolName),
     ).toEqual(['analyze_submission']);
     expect(
-      result.activity.find((item) => item.toolName === 'search_trusted_sources'),
+      result.activity.find(
+        (item) => item.type === 'tool.response' && item.toolName === 'search_trusted_sources',
+      ),
     ).toMatchObject({ toolKind: 'mcp', success: false });
     expect(result.activity.some((item) => item.toolName === 'export_case_report')).toBe(false);
   });
@@ -511,7 +551,9 @@ describe('case connector and execution evidence', () => {
       'analyze_submission',
     ]);
     expect(
-      result.activity.find((item) => item.toolName === 'search_trusted_sources'),
+      result.activity.find(
+        (item) => item.type === 'tool.response' && item.toolName === 'search_trusted_sources',
+      ),
     ).toMatchObject({ toolKind: 'mcp', success: false });
     expect(result.sandboxExecuted).toBe(false);
     expect(JSON.stringify(result.activity)).not.toContain('MODEL TEXT MUST NOT BE RENDERED');

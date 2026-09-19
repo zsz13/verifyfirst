@@ -32,6 +32,7 @@
     "@truefoundry/trueforge-sdk": "0.2.0",
     "express": "^5.1.0",
     "ipaddr.js": "^2.2.0",
+    "libphonenumber-js": "^1.13.13",
     "tldts": "^7.0.0",
     "zod": "^4.0.0"
   },

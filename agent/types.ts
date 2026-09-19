@@ -31,6 +31,8 @@ export interface Activity {
   label: string;
   detail: string;
   timestamp: string;
+  /** Elapsed call-to-result time from harness timestamps, including queue/approval waits. */
+  durationMs?: number;
   toolName?: string;
   toolKind?: 'mcp' | 'native';
   success?: boolean;

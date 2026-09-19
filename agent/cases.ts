@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { dataDir, harnessClient } from './config.ts';
 import { investigationSpec } from './policy.ts';
+import { extractMessageUrls, MAX_INVESTIGATION_URLS } from './input.ts';
 import {
   caseIdSchema,
   reportSchema,
@@ -25,10 +26,17 @@ export const submissionSchema = z
   .object({
     text: z.string().trim().max(12000).default(''),
     url: z.string().trim().max(2048).default(''),
+    sender: z.string().trim().max(320).default(''),
   })
   .refine(
-    (value) => value.text.length + value.url.length > 0,
-    'Paste a message or URL to investigate.',
+    (value) => value.text.length + value.url.length + value.sender.length > 0,
+    'Add a message, link, or sender to investigate.',
+  )
+  .refine(
+    (value) =>
+      new Set([...extractMessageUrls(value.text), ...(value.url ? [value.url] : [])]).size <=
+      MAX_INVESTIGATION_URLS,
+    `Investigate at most ${MAX_INVESTIGATION_URLS} links per case. Split this message into smaller investigations.`,
   );
 export class AppError extends Error {
   constructor(
@@ -89,7 +97,10 @@ export async function health(): Promise<HealthView> {
   };
 }
 export async function createCase(input: unknown): Promise<CaseView> {
-  const submission = submissionSchema.parse(input);
+  const parsed = submissionSchema.safeParse(input);
+  if (!parsed.success)
+    throw new AppError(parsed.error.issues[0]?.message ?? 'Check the investigation input.');
+  const submission = parsed.data;
   const ready = await health();
   if (!ready.configured || !ready.model) throw new AppError(ready.message, 503);
   const id = randomUUID();
@@ -285,7 +296,10 @@ function activity(events: TrueForgeApi.SessionEvent[], caseId: string): Activity
   const calls = new Map(
     events.flatMap((event) =>
       event.type === 'model.message'
-        ? (event.toolCalls ?? []).map((call) => [call.id, normalizeTool(call, caseId)] as const)
+        ? (event.toolCalls ?? []).map(
+            (call) =>
+              [call.id, { ...normalizeTool(call, caseId), startedAt: event.createdAt }] as const,
+          )
         : [],
     ),
   );
@@ -298,12 +312,15 @@ function activity(events: TrueForgeApi.SessionEvent[], caseId: string): Activity
           ...base,
           id: call.id,
           label: tool.name,
+          toolName: tool.name,
+          toolKind: tool.type === 'mcp' ? 'mcp' : 'native',
           detail:
             tool.type === 'mcp' ? 'TrueForge → VerifyFirst MCP' : 'TrueForge native tool execution',
         };
       });
     if (event.type === 'tool.response') {
       const tool = calls.get(event.toolCallId);
+      const elapsed = tool ? Date.parse(event.createdAt) - Date.parse(tool.startedAt) : NaN;
       const output =
         tool?.type === 'truefoundry-system' && tool.name === 'exec'
           ? sandboxOutput(event.content)
@@ -312,6 +329,7 @@ function activity(events: TrueForgeApi.SessionEvent[], caseId: string): Activity
         {
           ...base,
           label: `${tool?.name ?? 'Tool'} returned`,
+          ...(Number.isFinite(elapsed) && elapsed >= 0 ? { durationMs: elapsed } : {}),
           detail:
             output !== null
               ? `Sandbox output: ${output.slice(0, 800)}`

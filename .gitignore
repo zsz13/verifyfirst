@@ -10,3 +10,4 @@ playwright-report/
 *.tsbuildinfo
 .DS_Store
 /apps/web/*.md
+*.local.md

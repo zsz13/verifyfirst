@@ -1,0 +1,130 @@
+name: verifyfirst
+
+x-runtime: &runtime
+  image: verifyfirst:local
+  build: .
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-application: &application
+  TRUEFORGE_BASE_URL: http://trueforge:8790
+  VERIFYFIRST_MCP_URL: http://mcp:8791/mcp
+  VERIFYFIRST_DATA_DIR: /var/lib/verifyfirst/cases-data
+  TRUEFORGE_MODEL: ${TRUEFORGE_MODEL:-}
+  TRUEFORGE_SANDBOX: ${TRUEFORGE_SANDBOX:-auto}
+  TRUEFORGE_SUBAGENTS: ${TRUEFORGE_SUBAGENTS:-true}
+
+services:
+  init:
+    <<: *runtime
+    command: [init]
+    volumes:
+      - cases:/var/lib/verifyfirst
+
+  trueforge:
+    <<: *runtime
+    command: [harness]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8790
+      SQLITE_PATH: /var/lib/trueforge/trueforge.sqlite
+      LOCAL_SANDBOX_ROOT_PARENT: /var/lib/trueforge/sandboxes
+      LOG_LEVEL: warn
+    ports:
+      - 127.0.0.1:8790:8790
+    volumes:
+      - harness:/var/lib/trueforge
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:8790/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 35s
+
+  setup:
+    <<: *runtime
+    command: [setup]
+    environment:
+      <<: *application
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
+    volumes:
+      - cases:/var/lib/verifyfirst
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      trueforge:
+        condition: service_healthy
+
+  mcp:
+    <<: *runtime
+    command: [mcp]
+    environment:
+      <<: *application
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8791
+      IPQS_API_KEY: ${IPQS_API_KEY:-}
+      IPQS_API_KEY_FILE: /run/secrets/ipqs
+    volumes:
+      - cases:/var/lib/verifyfirst
+      - type: bind
+        source: ${IPQS_API_KEY_FILE:-./docker/empty-ipqs-key}
+        target: /run/secrets/ipqs
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:8791/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    <<: *runtime
+    command: [web]
+    environment:
+      <<: *application
+    ports:
+      - 127.0.0.1:3000:3000
+    volumes:
+      - cases:/var/lib/verifyfirst
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      mcp:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  cases:
+  harness:

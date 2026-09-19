@@ -1,12 +1,12 @@
 # VerifyFirst
 
-**Evidence before action.** Paste a suspicious message, URL, or sender identity. VerifyFirst investigates domains, retrieves independent official sources, preserves uncertainty, and creates a case report. Export pauses at a native TrueForge human-approval gate.
+**Evidence before action.** VerifyFirst investigates suspicious messages, links, phone numbers, email senders and claimed organizations together. It collects independent evidence, highlights contradictions, preserves uncertainty and produces an approval-gated report.
 
-The model runs on **TrueForge 0.2.0**. There is no separate agent loop and no direct model-provider call in VerifyFirst.
+The agent runs on **TrueForge 0.2.0** through its official SDK. TrueForge owns model calls, tool routing, native approvals, sandbox execution, durable sessions and traces. There is no separate agent loop or direct model-provider call in VerifyFirst.
 
-## Run locally
+## Fastest local setup
 
-Requires Node.js **22.14+**, npm, internet access, and a model-provider API key with available credit. Keep this single-user application on localhost.
+Requires **Node.js 22.14+**, npm, internet access and a model-provider key with available credit. Keep this single-user application on localhost.
 
 ```bash
 git clone https://github.com/zsz13/verifyfirst.git
@@ -16,118 +16,167 @@ cp .env.example .env
 npm run dev
 ```
 
-This starts TrueForge at **http://127.0.0.1:8790**, registers the private MCP connector, starts tools on **8791**, and starts VerifyFirst at **http://127.0.0.1:3000**.
+Open **http://127.0.0.1:8790 → Settings → Models**, configure a provider, then open **http://127.0.0.1:3000** and click **Reconnect**. Choose **The urgent bank alert**, then investigate. The first configured model is selected unless `TRUEFORGE_MODEL` names another configured model.
 
-1. Open TrueForge. In **Settings → Models**, configure a provider and its API key.
-2. Return to VerifyFirst and click **Reconnect**. The first configured model is selected unless `TRUEFORGE_MODEL` specifies an exact configured model name.
-3. Choose **The urgent bank alert**, then **Investigate message**.
+`npm run dev` starts TrueForge on 8790, registers the private MCP connector, starts tools on 8791 and the frontend on 3000. Setup generates the MCP token. Provider settings and sessions live outside the checkout in `~/.local/share/verifyfirst/trueforge.sqlite`; case evidence lives in ignored `.data/`.
 
-Keep keys in TrueForge Settings or ignored `.env`, never chat, commits, screenshots, or recordings. Setup generates a private MCP token. TrueForge stores provider configuration and sessions outside the checkout, in `~/.local/share/verifyfirst/trueforge.sqlite` with owner-only access.
+### Provider and optional environment configuration
 
-For environment-based setup, set `MODEL_PROVIDER` to a TrueForge catalog provider type and `MODEL_API_KEY` in `.env`, then run `npm run setup` while TrueForge runs. Restart the web service after changing `.env`.
+No API key is needed to build, test or run offline evaluations. A model provider is required for live investigations. Configure it through TrueForge Settings or set `MODEL_PROVIDER` and `MODEL_API_KEY`, then run `npm run setup` while TrueForge is running. `OPENAI_API_KEY` is also recognized.
 
-To keep a provider key outside the repository, set `VERIFYFIRST_ENV_FILE` in your shell to that external env file and run `npm run setup`. `OPENAI_API_KEY` is recognized automatically. The file is read only for local runtime configuration; its contents are not copied into the repository. TrueForge keeps its own local credential record outside the checkout in `~/.local/share/verifyfirst/`.
+To keep provider credentials outside the repository:
+
+```bash
+VERIFYFIRST_ENV_FILE=/absolute/path/to/private-provider.env npm run setup
+```
+
+The external env file is read at runtime; its contents are not copied into the checkout. TrueForge persists its own private credential record. Never put secrets in source, committed files, reports or build arguments.
+
+Useful settings in [.env.example](.env.example):
+
+- `TRUEFORGE_BASE_URL`: harness API, default `http://127.0.0.1:8790`.
+- `TRUEFORGE_MODEL`: exact configured model name; blank selects the first available model.
+- `MODEL_PROVIDER` / `MODEL_API_KEY`, or `OPENAI_API_KEY`: optional automated provider setup.
+- `VERIFYFIRST_ENV_FILE`: external provider env file, supplied through your shell.
+- `VERIFYFIRST_MCP_TOKEN`: generated automatically; authenticates the case-scoped connector.
+- `MCP_HOST`, `MCP_PORT`, `VERIFYFIRST_MCP_URL`: localhost defaults; Compose sets its internal service addresses.
+- `TRUEFORGE_SANDBOX=auto`: use an available supported sandbox; `false` disables it.
+- `DAYTONA_API_KEY`: optional sandbox provider configuration through setup.
+- `TRUEFORGE_SUBAGENTS=true`: enable native scoped investigators; `false` uses the coordinator alone.
+- `IPQS_API_KEY` or `IPQS_API_KEY_FILE`: optional phone reputation; see below.
+- `VERIFYFIRST_DATA_DIR`: optional private case-storage location; defaults to `.data/`.
+- `TRUEFORGE_TOKEN`: optional authenticated hosted TrueForge token.
+
+Restart affected services after changing environment configuration.
+
+### Optional IPQualityScore phone reputation
+
+Core investigations work without IPQS. To enrich phone evidence, set `IPQS_API_KEY` in your runtime environment or set `IPQS_API_KEY_FILE` to an external text file containing only the authorized key. Keep that file outside the repository and readable only by the runtime user. The MCP service sends the key in the documented **`IPQS-KEY` header**, never the request URL.
+
+IPQS observations include available validity/activity, fraud score, risky/recent-abuse/spammer flags, VOIP/prepaid status, carrier, line type and country/region. These are attributed third-party signals. Neither one score nor a valid number authenticates a caller or proves fraud. Missing keys, rate limits, invalid responses and service outages preserve local normalization and explicit uncertainty.
+
+See the [official Phone Number Validation API documentation](https://www.ipqualityscore.com/documentation/phone-number-validation-api/overview).
 
 ### Sandbox
 
-`TRUEFORGE_SANDBOX=auto` enables sandbox execution only when TrueForge reports availability. The pinned 0.2.0 runtime includes a native local fallback on supported macOS/Linux hosts. Its probe may fail inside another OS sandbox or without required system utilities; run from a normal terminal in that case. Do not substitute ordinary host execution or disable OS protections.
+On supported macOS/Linux hosts, pinned TrueForge 0.2.0 includes a native local sandbox fallback. Availability is probed by TrueForge. Nested OS sandboxes or missing system utilities can prevent it; use a normal terminal or configure **Settings → Sandbox providers → Daytona**. Daytona needs sandbox access and snapshot-creation permission.
 
-Alternatively configure **Settings → Sandbox providers → Daytona**, or set `DAYTONA_API_KEY` and rerun setup. The key needs sandbox access and snapshot-creation permission. If no sandbox is available, MCP investigation continues and the UI does not claim execution. The sandbox task uses Python's standard library to parse input, normalize hostnames, and calculate a fingerprint.
+The sandbox performs standard-library parsing, hostname inspection and fingerprinting. If unavailable, MCP investigation continues and the UI reports the limitation. No ordinary host execution substitutes for an isolated sandbox, and no OS security control is disabled.
 
-### Separate processes and production build
+## Docker / Compose
+
+Requires a running Docker engine and **Docker Compose v2+**. The same pinned application image runs the production frontend, MCP server, setup and TrueForge. Ports are published only on localhost; the MCP service stays on the private Compose network.
+
+```bash
+git clone https://github.com/zsz13/verifyfirst.git
+cd verifyfirst
+cp .env.example .env
+docker compose up --build -d
+docker compose ps
+```
+
+Open TrueForge at **http://127.0.0.1:8790**, configure a model, then open VerifyFirst at **http://127.0.0.1:3000** and reconnect. Stop any local processes occupying ports 3000 or 8790 first. You may instead set provider variables in an external Compose env file:
+
+```bash
+docker compose --env-file /absolute/path/to/private-runtime.env up --build -d
+```
+
+Compose creates a private MCP token automatically. Named volumes preserve cases, approvals, sessions and provider settings across restart. The containers run as a non-root user, drop capabilities and have no Docker socket, privileged mode or source mount. Optional `IPQS_API_KEY_FILE` is mounted read-only only into MCP; it must be readable by container UID 1000. An empty bundled placeholder is used when no file is configured. Never broaden access to a private key just to satisfy container permissions; use `IPQS_API_KEY` runtime injection if needed.
+
+**Sandbox execution inside Docker requires an available TrueForge sandbox provider.** Configure Daytona in Settings for reliable isolated execution. The restrictive container intentionally does not grant privileges to force the host-local sandbox to work. Availability and actual execution remain visible; Docker itself is not claimed as the agent sandbox.
+
+```bash
+docker compose logs --tail=80 web mcp setup
+docker compose restart web mcp
+# Reapply changed model/sandbox environment settings:
+docker compose run --rm setup
+# Stop services while keeping data:
+docker compose down
+```
+
+Do not use `down --volumes` unless you intend to delete saved cases and harness credentials. Do not print expanded Compose configuration when a real env file is active: interpolation can contain secrets.
+
+This is a localhost demo topology. For a shared harness, use TrueForge's [official hosted setup](https://trueforge.dev/quickstart) and authentication guidance; this frontend has no multi-user authorization and must not be exposed publicly. The official hosted topology uses Postgres and Redis. This Compose setup retains the project's single-process SQLite integration rather than introducing new infrastructure.
+
+## Investigation and demo flow
+
+1. Choose **The urgent bank alert**, or paste a message. A single detected link fills the editable link field; multiple links appear separately and all are investigated. Up to five distinct links are accepted. Links never open automatically.
+2. Add phone, email and a claimed organization together when available. These fields are untrusted claims; supplied contact details never become verified contacts. Use an explicit `+country code` for phone normalization.
+3. Investigate. Inspect the risk summary, meaningful signals, contradictions and recommended safe action. Deeper evidence, identity, technical checks and activity remain available without overwhelming the summary.
+4. At the native approval pause, refresh to confirm durable recovery. **Allow export** resumes TrueForge and automatically downloads the redacted JSON after completion. **Download again** is the fallback. Open the approved human report and use browser **Print / Save as PDF**.
+5. Try the injection sample and ordinary reminder. Embedded instructions must be ignored, while insufficient evidence must remain UNKNOWN/LOW EVIDENCE rather than automatic HIGH RISK.
+
+Export creates a local report; it does not contact a bank, regulator or other third party. Both JSON and printable HTML remain unavailable until approval. Activity shows real timestamps with seconds and measured call-to-result elapsed time, including scheduling and approval waits.
+
+See [demo scenarios](docs/DEMO.md) and [verification procedure](docs/VERIFICATION.md).
+
+## Architecture and capabilities
+
+```text
+apps/web/   Next.js + TypeScript investigation UI and local API
+apps/mcp/   Eight case-scoped investigation and report tools
+agent/      TrueForge SDK integration, policy, reports and session mapping
+fixtures/   Three synthetic demo messages
+evals/      Offline cases and live TrueForge scenarios
+tests/      Tool, evidence, approval, recovery and API tests
+scripts/    Local startup, container entrypoints and setup
+docs/       Architecture, demo and verification guidance
+```
+
+The main TrueForge agent coordinates content analysis, independent sources, sandbox work and report/export. Native identity and link/domain investigators can perform scoped independent checks for multi-signal cases; their activity remains in the TrueForge session trace. They cannot authorize export. The coordinator merges tool-owned observations into one case.
+
+MCP tools:
+
+- `analyze_submission`: extract supplied URLs, organizations, contacts, actions, urgency and known injection patterns.
+- `inspect_sender`: investigate original phone/email identities, optional IPQS reputation, email DNS/MX/SPF/DMARC, domain registration and organization mismatch.
+- `inspect_domain`: normalize hostnames and inspect punycode/lookalike patterns, DNS and RDAP where available.
+- `inspect_url`: inspect bounded public HTTP(S) responses and redirects without JavaScript or cookies.
+- `search_trusted_sources`: retrieve matching official pages from a bounded FTC, CFPB and Postal Inspection Service catalog; not unrestricted web search.
+- `verify_organization`: independently maintained Chase, Bank of America, Wells Fargo, PayPal and USPS references plus live official contact/security pages.
+- `create_case_report`: deterministic risk, comparisons, limitations and recommended actions from recorded evidence.
+- `export_case_report`: native approval plus a one-use case/report-bound grant; redacted JSON and a printable HTML representation of the same artifact.
+
+See [architecture and safety decisions](docs/ARCHITECTURE.md). Refresh/reconnect recovers the persisted harness session; closing the browser does not cancel an investigation.
+
+## Test and evaluate
+
+```bash
+npm ci
+npm run check        # lint, typecheck, tests, offline evals, production build
+npm run format:check
+
+# Services running; network required, no model required:
+node --import tsx --env-file=.env scripts/smoke-tools.ts
+
+# Configured model required; consumes provider credit:
+npm run eval:live
+# Combined message/URLs/phone/email + native subagent acceptance:
+npm run eval:signals
+```
+
+Offline evaluations exercise real parsing/report/export boundaries without pretending to prove model execution. Live evaluations check actual MCP use, sourced evidence, native approval/denial, injection handling, uncertainty and sandbox execution when available. They deny export automatically; successful approval is exercised through the frontend. Generated case/session data remains ignored.
+
+For a production frontend with local services:
 
 ```bash
 # Terminal 1
 npm run dev:harness
-
 # Terminal 2, after TrueForge starts
 npm run setup
 npm run dev:mcp
-
 # Terminal 3
 npm run build
 npm start
 ```
 
-Stop the web development server before switching to production mode. The production web server still needs TrueForge and MCP. `npm run dev:web` starts only the development frontend. This is not an internet-facing or multi-user deployment.
+## Safety and limitations
 
-## Investigation experience
+- All submitted and retrieved content is untrusted data. Injection pattern detection is not exhaustive; case binding, authoritative originals, fixed tool capabilities and approval grants enforce separate boundaries.
+- Only public HTTP(S), standard ports and revalidated redirects are inspected. DNS pinning, address filtering, deadlines and byte limits restrict SSRF and resource abuse.
+- Facts, suspicious signals and unknowns are labeled separately from conclusions. No SAFE verdict or invented numeric confidence is produced.
+- Official domains, HTTPS, domain age, IPQS scores and email DNS records never authenticate a sender. Email-header SPF/DKIM validation and mailbox ownership checks are not performed. Caller ID can be spoofed.
+- Unsupported organizations and unavailable sources remain unknown. The organization catalog and reference search are deliberately bounded. IPQS and other external services can be incomplete or wrong.
+- Case/session data may contain sensitive input. Use synthetic or redacted data. Export strips common contact patterns and URL queries but is not comprehensive anonymization.
+- No accounts or tenant isolation are provided. Keep services on localhost and do not expose them through public tunnels.
 
-- Pasted HTTP(S) links are detected without opening them. A single link fills the editable link field; multiple links are listed and included in the investigation. Removing the extra link field does not remove a URL still present in the original message. Cases accept up to five distinct links; larger submissions must be split rather than silently truncated.
-- Optional **Sender** accepts an email address or phone number. Use an explicit `+country code` for phone normalization; no country is guessed for national numbers. Numbering-plan country/type can differ from the caller’s current location or carrier. Caller ID can be spoofed. Email record presence does not prove successful message authentication.
-- **Allow export** resumes the native TrueForge approval. Once the export exists, JSON downloads automatically, with **Download again** as a fallback. The print-friendly report uses the same approved, redacted artifact; open it and choose browser **Print / Save as PDF**. No unapproved report can be downloaded in either format.
-- Activity shows seconds and measured call-to-result elapsed time. Elapsed time includes harness scheduling and approval waits; it is not CPU or exclusive tool execution time.
-- **How it works** explains evidence and limitations. **Stay safe** links to independent FTC and FBI/IC3 advice. The original evidence/check mark is provided locally as SVG and used in the UI, favicon, and report.
-
-No paid enrichment service is needed. Phone reputation, live carrier/ownership lookup, full email-header authentication, and URL threat-intelligence providers are deliberately deferred; core checks remain functional without them.
-
-## Three-minute demo
-
-1. **0:00–0:25:** Select the urgent bank alert. Show the request to move money and the supplied contact details. Samples are synthetic; reserved `.example` hosts deliberately do not resolve.
-2. **0:25–1:25:** Investigate. Show TrueForge's tool activity: extraction, DNS/RDAP, URL inspection, organization verification, trusted references, report creation, and native sandbox execution when available.
-3. **1:25–2:10:** Inspect the domain comparison, sourced evidence, unknown observations, and separate conclusion. Failed DNS alone does not prove fraud.
-4. **2:10–2:40:** **Film the pause.** Refresh while the native approval card is visible. Approve export and let the redacted JSON download automatically after the continuation succeeds. Open the print-friendly evidence report and use your browser’s Print / Save as PDF. Export contacts no bank, regulator, or third party.
-5. **2:40–3:00:** Show separate completed runs for the injection sample and ordinary reminder. The former must flag embedded instructions; the latter must retain UNKNOWN/LOW EVIDENCE rather than automatic HIGH RISK.
-
-See [demo notes](docs/DEMO.md).
-
-## Architecture
-
-```text
-apps/web/   Next.js + TypeScript workbench and local API
-apps/mcp/   Eight MCP tools, protected HTTP retrieval, evidence store
-agent/      TrueForge SDK integration, policy, durable session mapping
-fixtures/   Three synthetic demo messages
-evals/      Twelve offline cases and three model-backed scenarios
-tests/      Network, evidence, approval, and recovery boundary tests
-scripts/    Startup, setup, and live MCP smoke check
-docs/       Architecture, demo, and verification notes
-```
-
-TrueForge owns model calls, tool routing, approval state, sandbox provisioning, and session history. The frontend starts a background turn and reads durable events; closing or refreshing the page does not cancel execution. LocalStorage contains only a case UUID. The application stores original input, evidence, and case/session mapping privately on disk. A tab-scoped case ID records a requested automatic download; it never grants export permission.
-
-Each case gets a connector with a fixed case header. Tool arguments cannot switch cases. The stored original cannot be replaced by the model. Reports and risk labels are computed from tool-owned observations, not accepted from generated model JSON.
-
-Tools:
-
-- `analyze_submission`: extracts URLs, domains, organizations, contacts, requested actions, urgency, and known injection patterns.
-- `inspect_sender`: original sender only; international phone normalization/numbering metadata or email DNS/MX/SPF/DMARC, registration and independent organization comparison. Identity and reputation remain unverified.
-- `inspect_domain`: normalization, punycode/brand indicators, real DNS and RDAP registration information when available.
-- `inspect_url`: bounded public HTTP(S) inspection, pinned DNS, revalidated redirects, no JavaScript or cookies.
-- `search_trusted_sources`: searches a **bounded curated catalog** and retrieves matching FTC, CFPB, and Postal Inspection Service pages live; not unrestricted web search.
-- `verify_organization`: independently maintained Chase, Bank of America, Wells Fargo, PayPal, and USPS references; live official contact/security pages.
-- `create_case_report`: recorded evidence, comparisons, classification, limitations, and safer next actions.
-- `export_case_report`: native approval plus a single-use application grant bound to the report hash; redacted local JSON export; the approved artifact also renders as a print-friendly HTML report.
-
-## Verify
-
-```bash
-npm run check        # lint, typecheck, tests, 12 offline evals, production build
-npm run format:check
-
-# Services running; real network, no model required:
-node --import tsx --env-file=.env scripts/smoke-tools.ts
-
-# Configured model required; consumes provider credit:
-npm run eval:live
-```
-
-Offline evals exercise real parsing/report/export code with honestly unavailable external evidence. They do not fabricate web results or prove model execution. Live evals require three distinct successful MCP tools, native approval pauses, sourced evidence, injection handling, uncertainty, completed denial continuations, and actual execution when a sandbox is available. They **do not automatically approve exports**; exercise successful approval through the frontend.
-
-Live session IDs/results stay in ignored `.data/`. [Verification notes](docs/VERIFICATION.md) separate deterministic checks, live scenarios, and browser verification.
-
-## Boundaries
-
-- All submitted/retrieved content is untrusted data. Pattern detection is not a guarantee that every injection is recognized. Fixed tool capabilities, authoritative originals, case binding, and export grants enforce boundaries independently of model behavior.
-- Public HTTP(S), standard ports only. Localhost, private/reserved addresses, IP literals, credentials in URLs, unsafe redirects, mixed DNS answers, and unsupported protocols are rejected. Deadlines, byte limits, and redirect limits bound requests.
-- A known official domain does not authenticate the sender. Age, DNS, and HTTPS never establish safety. Unsupported organizations and unavailable sources stay unknown. General reference pages do not prove an individual sender's identity or intent.
-- Submitted phone numbers never become trusted contacts. Use independently sourced official pages or contact details you already know.
-- Sandbox isolation and egress are provided by the configured TrueForge provider. The requested parsing step is network-free; retain provider isolation controls. Model/MCP credentials are not intentionally placed in the sandbox.
-- Sessions and reports can contain sensitive input. Use synthetic/redacted data for the demo. Export removes common phone/email patterns and URL queries but is not comprehensive anonymization. It remains local unless the user shares it.
-- There are no accounts or tenant boundaries. Do not publicly expose these local services or put them behind a tunnel.
-
-## Hackathon sources
-
-The supplied **“BRIEF: TrueForge challenge for the Agent Harness Hackathon”** is the primary requirements source: finish one real job, show harness work, publish a runnable repository, and film an approximately three-minute demo with the pause/sandbox step.
-
-Official references: [quickstart](https://trueforge.dev/quickstart), [SDK](https://trueforge.dev/api/quickstart), [turns and approvals](https://trueforge.dev/api/use-agent), [agent configuration](https://trueforge.dev/create-agent/overview), [sandbox](https://trueforge.dev/sandbox), and [source](https://github.com/truefoundry/trueforge). Installed 0.2.0 types/runtime are the compatibility reference where documentation lags.
+Built for [The Agent Harness Hackathon / HackerSquad](https://hackersquad.io/events/truefoundry-agent-harness-hackathon). Official TrueForge references: [quickstart](https://trueforge.dev/quickstart), [SDK](https://trueforge.dev/api/quickstart), [approvals](https://trueforge.dev/api/use-agent), [subagents](https://trueforge.dev/key-features/subagents), [sandbox](https://trueforge.dev/sandbox), [source](https://github.com/truefoundry/trueforge). Installed 0.2.0 types/runtime remain the compatibility reference where documentation differs.

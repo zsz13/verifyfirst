@@ -1,0 +1,49 @@
+{
+  "name": "verifyfirst",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.14.0" },
+  "workspaces": ["apps/web"],
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:mcp": "tsx --env-file-if-exists=.env apps/mcp/src/server.ts",
+    "dev:harness": "tsx --env-file-if-exists=.env scripts/harness.ts",
+    "setup": "tsx --env-file-if-exists=.env scripts/setup.ts",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace apps/web",
+    "test": "vitest run",
+    "eval": "tsx evals/run.ts",
+    "eval:live": "tsx --env-file-if-exists=.env evals/live.ts",
+    "build": "npm run build --workspace apps/web",
+    "start": "npm run start --workspace apps/web",
+    "check": "npm run lint && npm run typecheck && npm test && npm run eval && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@truefoundry/trueforge": "0.2.0",
+    "@truefoundry/trueforge-sdk": "0.2.0",
+    "express": "^5.1.0",
+    "ipaddr.js": "^2.2.0",
+    "tldts": "^7.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.56.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "prettier": "^3.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "7.0.2",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^3.2.4"
+  }
+}

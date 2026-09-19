@@ -2,6 +2,8 @@
 
 One investigation maps to one TrueForge session. Next.js uses the official SDK to create an inline agent and a background turn. TrueForge owns the model/tool loop, pending approvals, native sandbox, and SQLite history. Polling reads actual persisted events; progress is not simulated.
 
+TrueForge stores provider credentials and session history outside the checkout in `~/.local/share/verifyfirst/trueforge.sqlite`; the runtime uses owner-only file permissions.
+
 The original submission, evidence, case/session mapping, approval journal, and export are private files in `.data/cases/<uuid>/`. The browser stores only the case UUID. Reconnect reconciles the latest harness turn. One local application process is the supported deployment.
 
 ## Data boundary

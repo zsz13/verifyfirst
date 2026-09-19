@@ -28,6 +28,8 @@ TrueForge can record direct MCP calls or a native `call_tool` dispatcher. Both f
 
 An initial invalid credential produced HTTP 401 and was replaced externally. The app recovered without code changes or secret copies. Failed-session restoration was also verified. External DNS/RDAP failures are retained as unknown observations.
 
+The production frontend restored the completed bank report and its download. TrueForge's credential database was relocated outside the checkout with owner-only permissions; restarting preserved the configured model, sandbox availability, and session history. An exact credential scan found no provider key in tracked files, repository `.env`, or local application data.
+
 ## Reproduce
 
 ```bash

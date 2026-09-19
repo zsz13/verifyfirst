@@ -22,11 +22,11 @@ This starts TrueForge at **http://127.0.0.1:8790**, registers the private MCP co
 2. Return to VerifyFirst and click **Reconnect**. The first configured model is selected unless `TRUEFORGE_MODEL` specifies an exact configured model name.
 3. Choose **The urgent bank alert**, then **Investigate message**.
 
-Keep keys in TrueForge Settings or ignored `.env`, never chat, commits, screenshots, or recordings. Setup generates a private MCP token. TrueForge stores provider configuration and sessions in ignored `.data/trueforge.sqlite`.
+Keep keys in TrueForge Settings or ignored `.env`, never chat, commits, screenshots, or recordings. Setup generates a private MCP token. TrueForge stores provider configuration and sessions outside the checkout, in `~/.local/share/verifyfirst/trueforge.sqlite` with owner-only access.
 
 For environment-based setup, set `MODEL_PROVIDER` to a TrueForge catalog provider type and `MODEL_API_KEY` in `.env`, then run `npm run setup` while TrueForge runs. Restart the web service after changing `.env`.
 
-To keep a provider key outside the repository, set `VERIFYFIRST_ENV_FILE` in your shell to that external env file and run `npm run setup`. `OPENAI_API_KEY` is recognized automatically. The file is read only for local runtime configuration; its contents are not copied into the repository. TrueForge keeps its own local credential record in ignored `.data/`.
+To keep a provider key outside the repository, set `VERIFYFIRST_ENV_FILE` in your shell to that external env file and run `npm run setup`. `OPENAI_API_KEY` is recognized automatically. The file is read only for local runtime configuration; its contents are not copied into the repository. TrueForge keeps its own local credential record outside the checkout in `~/.local/share/verifyfirst/`.
 
 ### Sandbox
 

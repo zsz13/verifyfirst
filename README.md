@@ -88,6 +88,8 @@ Useful settings in [.env.example](.env.example):
 - `DAYTONA_API_KEY`: optional sandbox provider configuration through setup.
 - `TRUEFORGE_SUBAGENTS=true`: enable native scoped investigators; `false` uses the coordinator alone.
 - `IPQS_API_KEY` or `IPQS_API_KEY_FILE`: optional phone reputation; see below.
+- Any credential above may instead be a file in `secrets/` named after the variable,
+  lowercased (`secrets/ipqs_api_key`). A file wins over the environment variable.
 - `VERIFYFIRST_DATA_DIR`: optional private case-storage location; defaults to `.data/`.
 - `TRUEFORGE_TOKEN`: optional authenticated hosted TrueForge token.
 
@@ -109,23 +111,81 @@ The sandbox performs standard-library parsing, hostname inspection and fingerpri
 
 ## Docker / Compose
 
-Requires a running Docker engine and **Docker Compose v2+**. The same pinned application image runs the production frontend, MCP server, setup and TrueForge. Ports are published only on localhost; the MCP service stays on the private Compose network.
+Requires a running Docker engine and **Docker Compose v2+**. One pinned Dockerfile and build context produce the image behind the production frontend, MCP server, setup and TrueForge, so the layers are built once and shared. Ports are published only on localhost; the MCP service stays on the private Compose network.
+
+### Quick start
 
 ```bash
 git clone https://github.com/zsz13/verifyfirst.git
 cd verifyfirst
-cp .env.example .env
-docker compose up --build -d
-docker compose ps
+cp .env.example .env          # optional: edit it to add a model key
+docker compose up --build
 ```
 
-Open TrueForge at **http://127.0.0.1:8790**, configure a model, then open VerifyFirst at **http://127.0.0.1:3000** and reconnect. Stop any local processes occupying ports 3000 or 8790 first. You may instead set provider variables in an external Compose env file:
+| Service     | URL                       |
+| ----------- | ------------------------- |
+| VerifyFirst | **http://127.0.0.1:3000** |
+| TrueForge   | **http://127.0.0.1:8790** |
+
+Nothing in `.env` is required to start. With no `.env` at all the stack still
+builds, every service becomes healthy and the UI loads; it reports
+`Awaiting model` until you configure one. Stop any local process already holding
+port 3000 or 8790 first.
+
+**Credentials, and when each one matters**
+
+| Credential                         | Needed for                       | Without it                                                |
+| ---------------------------------- | -------------------------------- | --------------------------------------------------------- |
+| `MODEL_PROVIDER` + `MODEL_API_KEY` | running an investigation         | Everything starts; the UI says a model must be configured |
+| `OPENAI_API_KEY`                   | shortcut for the OpenAI provider | As above                                                  |
+| `IPQS_API_KEY`                     | third-party phone reputation     | Phone checks use local numbering-plan analysis only       |
+| `DAYTONA_API_KEY`                  | isolated sandbox execution       | The agent runs without a sandbox; the UI reflects that    |
+| `TRUEFORGE_TOKEN`                  | a hosted TrueForge               | Unused by this local topology                             |
+
+No credential is required for startup, so an absent optional key is never a
+startup failure. A model is the only one an investigation cannot run without,
+and you can supply it either in `.env` or in the TrueForge UI under
+**Settings → Models** — both routes are equivalent.
+
+**Advanced: file-based secrets instead of `.env`**
+
+Put the value in a file under `secrets/` named after the variable, lowercased.
+The directory is mounted read-only into the containers that need it and is
+git-ignored:
 
 ```bash
-docker compose --env-file /absolute/path/to/private-runtime.env up --build -d
+printf '%s' 'your-key-here' > secrets/ipqs_api_key
+chmod 600 secrets/ipqs_api_key
+docker compose up --build
 ```
 
-Compose creates a private MCP token automatically. Named volumes preserve cases, approvals, sessions and provider settings across restart. The containers run as a non-root user, drop capabilities and have no Docker socket, privileged mode or source mount. Optional `IPQS_API_KEY_FILE` is mounted read-only only into MCP; it must be readable by container UID 1000. An empty bundled placeholder is used when no file is configured. Never broaden access to a private key just to satisfy container permissions; use `IPQS_API_KEY` runtime injection if needed.
+Resolution order for every credential is the same and is applied at the point
+the feature is used:
+
+1. `<NAME>_FILE`, if set — an explicit path that cannot be read is reported as an error, never silently ignored.
+2. `secrets/<name>` — used when that file exists; absent is normal.
+3. `<NAME>` environment variable, from `.env` or your shell.
+4. Otherwise the integration reports itself as not configured.
+
+Use `<NAME>_FILE` only to point at a mount your orchestrator provides; the
+`secrets/` directory needs no absolute paths and works the same on every machine.
+See `secrets/README.md`. Secrets are excluded from the Docker build context and
+never enter an image layer or a build argument.
+
+You can also keep credentials entirely outside the repository with an external
+Compose env file:
+
+```bash
+docker compose --env-file /path/to/private-runtime.env up --build -d
+```
+
+Compose takes its project namespace from the checkout directory, so `~/verifyfirst` and `~/verifyfirst-test` get separate containers, networks, volumes and built images and never share state. Pass `-p` for an explicit name:
+
+```bash
+docker compose -p my-name up --build
+```
+
+Compose creates a private MCP token automatically. Named volumes preserve cases, approvals, sessions and provider settings across restart. They are scoped to the project, so `docker compose down -v` only ever removes the current checkout's data. The containers run as a non-root user, drop capabilities and have no Docker socket, privileged mode or source mount. A secret file must be readable by container UID 1000; if it is not, VerifyFirst says so explicitly rather than failing silently. Never broaden access to a private key just to satisfy container permissions.
 
 **Sandbox execution inside Docker requires an available TrueForge sandbox provider.** Configure Daytona in Settings for reliable isolated execution. The restrictive container intentionally does not grant privileges to force the host-local sandbox to work. Availability and actual execution remain visible; Docker itself is not claimed as the agent sandbox.
 
@@ -137,6 +197,8 @@ docker compose run --rm setup
 # Stop services while keeping data:
 docker compose down
 ```
+
+`trueforge`, `mcp` and `web` restart on failure, so a service that keeps failing shows as `Restarting` in `docker compose ps` rather than sitting at an exit code; read its logs. `init` and `setup` are one-shot and exit 0 when they succeed — a failed `setup` stops `up` with `service "setup" didn't complete successfully`. Ctrl+C stops the long-running services with exit 0; interrupting `up` while `setup` is still waiting on its dependencies leaves that one-shot at exit 143, which is the interrupt rather than a fault.
 
 Do not use `down --volumes` unless you intend to delete saved cases and harness credentials. Do not print expanded Compose configuration when a real env file is active: interpolation can contain secrets.
 

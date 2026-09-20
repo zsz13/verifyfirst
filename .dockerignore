@@ -4,6 +4,8 @@ node_modules
 .env
 .env.*
 !.env.example
+# Secrets are bind-mounted at runtime; they must never enter an image layer.
+secrets
 .data
 **/.next
 coverage

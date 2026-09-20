@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { resolveCredential } from '../../../agent/credentials.ts';
 
 export const IPQS_SOURCE =
   'https://www.ipqualityscore.com/documentation/phone-number-validation-api/response-parameters';
@@ -95,20 +95,15 @@ export async function lookupPhoneReputation(e164: string): Promise<PhoneReputati
   const unavailable = (reason: string): PhoneReputation => ({ status: 'unavailable', reason });
   if (!/^\+[1-9]\d{3,14}$/.test(e164))
     return unavailable('A normalized international number is required.');
-  let key = process.env.IPQS_API_KEY?.trim();
-  try {
-    if (!key && process.env.IPQS_API_KEY_FILE) {
-      const contents = await readFile(process.env.IPQS_API_KEY_FILE, 'utf8');
-      key = contents.length <= 4096 ? contents.trim() : undefined;
-      if (!key) return unavailable('IPQS credential file is empty or invalid.');
-    }
-  } catch {
-    return unavailable('IPQS credential file is unavailable.');
-  }
-  if (!key)
-    return { status: 'unconfigured', reason: 'Optional IPQS reputation lookup is not configured.' };
-  if (key.length > 4096 || /\s/.test(key))
-    return unavailable('IPQS credential configuration is invalid.');
+  const credential = await resolveCredential('IPQS_API_KEY', 'IPQS API key');
+  // A misconfigured optional credential is reported, never fatal: local checks still run.
+  if (credential.status === 'invalid') return unavailable(credential.detail);
+  if (credential.status === 'not_configured')
+    return {
+      status: 'unconfigured',
+      reason: 'Optional IPQS phone reputation is not configured, so it was skipped.',
+    };
+  const key = credential.value;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {

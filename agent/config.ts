@@ -3,6 +3,7 @@ import { loadEnvFile } from 'node:process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TrueForge } from '@truefoundry/trueforge-sdk';
+import { credentialValue, resolveCredentialSync } from './credentials.ts';
 
 export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 if (existsSync(resolve(projectRoot, '.env'))) loadEnvFile(resolve(projectRoot, '.env'));
@@ -16,7 +17,8 @@ export const mcpUrl =
 export function harnessClient() {
   return new TrueForge({
     baseUrl: harnessUrl,
-    token: process.env.TRUEFORGE_TOKEN || undefined,
+    // Optional: only a hosted TrueForge requires a token. Supports TRUEFORGE_TOKEN_FILE too.
+    token: credentialValue(resolveCredentialSync('TRUEFORGE_TOKEN', 'TrueForge token')),
     timeoutInSeconds: 30,
     maxRetries: 0,
   });

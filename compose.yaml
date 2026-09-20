@@ -1,7 +1,7 @@
-name: verifyfirst
-
+# No explicit image tag: Compose names built images per project, so two checkouts
+# never overwrite each other's build. All services share one Dockerfile and build
+# context, so the layers are built once and reused.
 x-runtime: &runtime
-  image: verifyfirst:local
   build: .
   init: true
   security_opt:
@@ -9,10 +9,21 @@ x-runtime: &runtime
   cap_drop:
     - ALL
 
+# Repository-relative, so it works identically on any machine. The directory always
+# exists; a secret file inside it is optional and absent files are not an error.
+x-secrets: &secrets
+  type: bind
+  source: ./secrets
+  target: /run/secrets/verifyfirst
+  read_only: true
+  bind:
+    create_host_path: false
+
 x-application: &application
   TRUEFORGE_BASE_URL: http://trueforge:8790
   VERIFYFIRST_MCP_URL: http://mcp:8791/mcp
   VERIFYFIRST_DATA_DIR: /var/lib/verifyfirst/cases-data
+  VERIFYFIRST_SECRETS_DIR: /run/secrets/verifyfirst
   TRUEFORGE_MODEL: ${TRUEFORGE_MODEL:-}
   TRUEFORGE_SANDBOX: ${TRUEFORGE_SANDBOX:-auto}
   TRUEFORGE_SUBAGENTS: ${TRUEFORGE_SUBAGENTS:-true}
@@ -48,6 +59,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+      start_period: 20s
+    restart: on-failure
     stop_grace_period: 35s
 
   setup:
@@ -61,6 +74,7 @@ services:
       DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
     volumes:
       - cases:/var/lib/verifyfirst
+      - *secrets
     depends_on:
       init:
         condition: service_completed_successfully
@@ -75,15 +89,9 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8791
       IPQS_API_KEY: ${IPQS_API_KEY:-}
-      IPQS_API_KEY_FILE: /run/secrets/ipqs
     volumes:
       - cases:/var/lib/verifyfirst
-      - type: bind
-        source: ${IPQS_API_KEY_FILE:-./docker/empty-ipqs-key}
-        target: /run/secrets/ipqs
-        read_only: true
-        bind:
-          create_host_path: false
+      - *secrets
     depends_on:
       init:
         condition: service_completed_successfully
@@ -98,6 +106,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 10s
+    restart: on-failure
 
   web:
     <<: *runtime
@@ -108,6 +118,7 @@ services:
       - 127.0.0.1:3000:3000
     volumes:
       - cases:/var/lib/verifyfirst
+      - *secrets
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -124,6 +135,8 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
+      start_period: 30s
+    restart: on-failure
 
 volumes:
   cases:

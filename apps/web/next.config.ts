@@ -5,7 +5,7 @@ process.env.WATCHPACK_POLLING = 'true';
 const config: NextConfig = {
   poweredByHeader: false,
   agentRules: false,
-  outputFileTracingExcludes: { '/*': ['../../.data/**/*', '../../.env*'] },
+  outputFileTracingExcludes: { '/*': ['../../.data/**/*', '../../.env*', '../../secrets/**/*'] },
 };
 
 export default config;

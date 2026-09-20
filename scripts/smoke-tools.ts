@@ -35,6 +35,7 @@ try {
         submittedDomain: 'chase-security-review.example',
       },
     },
+    { name: 'inspect_sender', arguments: { caseId } },
     { name: 'search_trusted_sources', arguments: { caseId, query: 'bank money transfer' } },
     { name: 'create_case_report', arguments: { caseId } },
   ];

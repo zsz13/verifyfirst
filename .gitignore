@@ -3,6 +3,9 @@ node_modules/
 .env
 .env.*
 !.env.example
+secrets/*
+!secrets/.gitkeep
+!secrets/README.md
 .data/
 coverage/
 test-results/

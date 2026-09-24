@@ -20,5 +20,7 @@ RUN mkdir -p /var/lib/verifyfirst /var/lib/trueforge \
     && chown node:node /var/lib/verifyfirst /var/lib/trueforge \
     && chmod 700 /var/lib/verifyfirst /var/lib/trueforge
 USER node
-ENTRYPOINT ["node", "--import", "tsx", "scripts/container.ts"]
+# Node strips the wrapper's TypeScript natively; skipping tsx here saves ~60 MB of RSS per
+# service. The MCP server still starts under tsx because it uses non-erasable syntax.
+ENTRYPOINT ["node", "scripts/container.ts"]
 CMD ["web"]

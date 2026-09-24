@@ -1,0 +1,17 @@
+# Bootstrap configuration: used only until the Let's Encrypt certificate for ${DOMAIN}
+# exists. Nothing is proxied over plain HTTP, so credentials never travel unencrypted.
+server_tokens off;
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        default_type text/plain;
+        return 503 "The HTTPS certificate for ${DOMAIN} is being issued. Retry in a minute.\n";
+    }
+}

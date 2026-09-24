@@ -4,10 +4,17 @@ import { AppError } from '../../../../agent/cases';
 
 export function guardRequest(request: Request) {
   const host = request.headers.get('host');
-  if (!host || !/^(localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/.test(host))
+  // Production sets this to the HTTPS address the reverse proxy serves, e.g. https://verify.example.com.
+  const configured = process.env.VERIFYFIRST_PUBLIC_URL;
+  const publicUrl = configured ? new URL(configured) : undefined;
+  if (
+    !host ||
+    (host !== publicUrl?.host && !/^(localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/.test(host))
+  )
     throw new AppError('VerifyFirst is available only on localhost.', 403);
   // Next may normalize request.url to its bind address; validate the actual Host header.
-  const url = new URL(`${new URL(request.url).protocol}//${host}`);
+  const url =
+    host === publicUrl?.host ? publicUrl : new URL(`${new URL(request.url).protocol}//${host}`);
   const origin = request.headers.get('origin');
   if (origin && origin !== url.origin)
     throw new AppError('Cross-origin requests are not accepted.', 403);

@@ -202,7 +202,80 @@ docker compose down
 
 Do not use `down --volumes` unless you intend to delete saved cases and harness credentials. Do not print expanded Compose configuration when a real env file is active: interpolation can contain secrets.
 
-This is a localhost demo topology. For a shared harness, use TrueForge's [official hosted setup](https://trueforge.dev/quickstart) and authentication guidance; this frontend has no multi-user authorization and must not be exposed publicly. The official hosted topology uses Postgres and Redis. This Compose setup retains the project's single-process SQLite integration rather than introducing new infrastructure.
+This is a localhost demo topology. This frontend has no multi-user authorization, so never publish these ports directly; to put VerifyFirst on the internet, use the password-protected [production deployment](#production-deployment-vps) below. For a shared harness, use TrueForge's [official hosted setup](https://trueforge.dev/quickstart) and authentication guidance. The official hosted topology uses Postgres and Redis. This Compose setup retains the project's single-process SQLite integration rather than introducing new infrastructure.
+
+## Production deployment (VPS)
+
+`compose.prod.yaml` runs VerifyFirst on one small VPS (sized for **2 GB RAM / 2 vCPU**) behind Nginx, with a Let's Encrypt certificate that is issued and renewed automatically. Only Nginx publishes ports (80 and 443). TrueForge, the MCP server and the web frontend stay on private Docker networks, and Nginx can reach only the frontend. Everything is configured from one `.env` file (no `secrets/` directory is mounted in production); nothing is set up in the TrueForge UI.
+
+VerifyFirst has no user accounts, so Nginx asks every visitor for one shared username and password (HTTP Basic Auth, over HTTPS only) and rate-limits new investigations per client. Nobody without the password can spend your model credit.
+
+**Before the first deploy**
+
+- An Ubuntu 22.04/24.04 or Debian 12 VPS with a public IPv4 address, and ports 22, 80 and 443 open in the provider's firewall.
+- A DNS **A record** (IPv4) for your domain pointing at the VPS. Do not add an AAAA record: with Docker's default networking every IPv6 visitor would reach Nginx from the same internal address, sharing one rate limit.
+
+**First deploy** (as root: `sudo -i`)
+
+```bash
+# Docker Engine with the Compose plugin
+curl -fsSL https://get.docker.com | sh
+
+# 2 GB swap: building the image needs more memory than a 2 GB server has free
+[ -f /swapfile ] || { fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab; }
+
+git clone https://github.com/zsz13/verifyfirst.git /opt/verifyfirst
+cd /opt/verifyfirst
+cp .env.production.example .env
+chmod 600 .env
+nano .env        # fill in the REQUIRED block
+
+docker compose -f compose.prod.yaml up -d --build
+```
+
+The configuration lives in exactly one file, **`/opt/verifyfirst/.env`**, which is git-ignored. `.env.production.example` documents every value. Put any value containing `$`, `#` or spaces in single quotes.
+
+| Variable                                   | Required | Purpose                                                                               |
+| ------------------------------------------ | -------- | ------------------------------------------------------------------------------------- |
+| `DOMAIN`                                   | yes      | Public hostname, e.g. `verify.example.com` (no `https://`)                            |
+| `BASIC_AUTH_USER`, `BASIC_AUTH_PASSWORD`   | yes      | The sign-in every visitor needs; password ≥ 12 characters (`openssl rand -base64 18`) |
+| `MODEL_PROVIDER`, `MODEL_API_KEY`          | yes      | The AI model, e.g. `openai` plus its key; registered in TrueForge on start            |
+| `LETSENCRYPT_EMAIL`                        | no       | Let's Encrypt account contact; blank registers without one                            |
+| `TRUEFORGE_MODEL`                          | no       | Pin a model, e.g. `openai/gpt-5-4-mini`; blank uses the first one                     |
+| `IPQS_API_KEY`                             | no       | Phone reputation; blank uses local numbering-plan analysis                            |
+| `DAYTONA_API_KEY`                          | no       | Isolated sandbox; blank runs without one and the UI says so                           |
+| `TRUEFORGE_SANDBOX`, `TRUEFORGE_SUBAGENTS` | no       | Default `auto` / `true`                                                               |
+
+Compose refuses to start while a required value is empty and names the missing variable. The first build takes several minutes. On first start Nginx serves only the certificate challenge; Certbot obtains the certificate and Nginx switches to HTTPS within 30 seconds of it being issued. Then open `https://<DOMAIN>` and sign in. To watch it happen:
+
+```bash
+docker compose -f compose.prod.yaml ps
+docker compose -f compose.prod.yaml logs -f certbot nginx setup
+```
+
+If the certificate request fails (DNS not pointing at the server yet, port 80 closed), Certbot logs the reason and retries every 15 minutes, which stays inside Let's Encrypt's failure limits. `setup` logs whether the model was registered.
+
+**Updates**
+
+```bash
+cd /opt/verifyfirst
+git pull
+docker compose -f compose.prod.yaml up -d --build
+docker compose -f compose.prod.yaml restart nginx certbot
+docker image prune -f
+```
+
+The old containers keep serving while the new image builds; switching to the new containers takes up to about a minute, during which the site returns 502 and a running investigation is interrupted. The `restart` applies changes to the Nginx and Certbot files under `deploy/`, which are mounted rather than built into an image. `setup` reruns on every `up` and reapplies the model and sandbox settings from `.env`, so after editing only `.env`, `docker compose -f compose.prod.yaml up -d` is enough. Setup adds and updates settings but never removes them: after blanking `DAYTONA_API_KEY` also set `TRUEFORGE_SANDBOX=false`, and after switching `MODEL_PROVIDER` set `TRUEFORGE_MODEL` to one of the new provider's models. If the UI says a model is missing, `docker compose -f compose.prod.yaml logs setup` says why; the TrueForge UI it mentions is intentionally not reachable in production. Cases, TrueForge state and certificates live in named volumes and survive updates and reboots. `docker compose -f compose.prod.yaml down` stops everything and keeps the data; `down -v` deletes it, including the certificate.
+
+**Sized for 2 GB RAM / 2 vCPU.** Measured at idle, the whole stack uses about 400 MB.
+
+- Each app service has a memory and CPU limit and a matching Node heap cap, so a leak restarts one service instead of exhausting the server, and no single service can take both CPUs.
+- The container wrapper runs on Node's built-in TypeScript support instead of `tsx`, saving about 60 MB per service (the MCP server keeps `tsx`).
+- Health checks, which each start a Node process, run every 30 seconds once a service is healthy, and every 2 seconds only during start-up.
+- Container logs rotate at 10 MB × 3 files; Nginx is the Alpine image (~20 MB); Certbot sleeps between renewal checks.
+- Swap lets the image build on the server while the running stack keeps serving.
+
+The production file needs Docker Engine 25+ with Compose v2.24+, which the install command above provides. `compose.yaml` is unchanged and remains the localhost development setup.
 
 ## Investigation and demo flow
 
@@ -288,6 +361,6 @@ npm start
 - Unsupported organizations and unavailable sources remain unknown. The organization catalog and reference search are deliberately bounded. IPQS and other external services can be incomplete or wrong.
 - Model execution can stop early and sandbox steps can fail. Live evaluations check the approval pause and actual execution; no export is allowed without approval even when an investigation is incomplete.
 - Case/session data may contain sensitive input. Use synthetic or redacted data. Export strips common contact patterns and URL queries but is not comprehensive anonymization.
-- No accounts or tenant isolation are provided. Keep services on localhost and do not expose them through public tunnels.
+- No accounts or tenant isolation are provided. Keep services on localhost and do not expose them through public tunnels; the [production deployment](#production-deployment-vps) puts one shared password in front of everything, and everyone with it sees the same cases.
 
 Built for [The Agent Harness Hackathon / HackerSquad](https://hackersquad.io/events/truefoundry-agent-harness-hackathon). Official TrueForge references: [quickstart](https://trueforge.dev/quickstart), [SDK](https://trueforge.dev/api/quickstart), [approvals](https://trueforge.dev/api/use-agent), [subagents](https://trueforge.dev/key-features/subagents), [sandbox](https://trueforge.dev/sandbox), [source](https://github.com/truefoundry/trueforge). Installed 0.2.0 types/runtime remain the compatibility reference where documentation differs.

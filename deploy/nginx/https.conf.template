@@ -1,0 +1,75 @@
+# Public entry point for ${DOMAIN}. Only this container publishes ports; the app is
+# reached over the private "edge" network and never sees plain HTTP from the internet.
+
+server_tokens off;
+
+# Per-client limits. Polling a running case is ~1 request/1.5 s, far below the general
+# limit; new submissions (POST) are limited separately because each one spends model credit.
+limit_req_zone $binary_remote_addr zone=verifyfirst_requests:1m rate=10r/s;
+map $request_method $verifyfirst_submitter {
+    POST    $binary_remote_addr;
+    default "";
+}
+limit_req_zone $verifyfirst_submitter zone=verifyfirst_submissions:1m rate=6r/m;
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://${DOMAIN}$request_uri;
+    }
+}
+
+# Refuse TLS for any name other than the configured domain.
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:verifyfirst_tls:2m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # The app has no user accounts; this password keeps strangers off the model key.
+    auth_basic "VerifyFirst";
+    auth_basic_user_file /etc/nginx/htpasswd;
+
+    client_max_body_size 64k;
+    limit_req zone=verifyfirst_requests burst=50 nodelay;
+    limit_req zone=verifyfirst_submissions burst=5 nodelay;
+    limit_req_status 429;
+
+    # Resolve through Docker's DNS on each lookup so a recreated web container is found.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $web http://web:3000;
+
+    location / {
+        proxy_pass $web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        # The Basic Auth password is for Nginx only; never forward it to the app.
+        proxy_set_header Authorization "";
+        proxy_read_timeout 120s;
+    }
+}
